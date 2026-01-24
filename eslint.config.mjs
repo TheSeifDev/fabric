@@ -12,6 +12,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    "electron/**", // Keep linting the electron main process files.
   ]),
 ]);
 
