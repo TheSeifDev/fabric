@@ -13,11 +13,56 @@ import {
 } from 'lucide-react';
 import { Roll, CURRENT_USER_ROLE } from './types';
 
-// Mock Data
+// Mock Data (temporary - will be replaced with IPC calls)
 const initialRolls: Roll[] = [
-  { barcode: '10002345', catalog: 'Velvet Soft', color: 'Royal Blue', degree: 'A', length: 45.5, status: 'In Stock', createdAt: '2024-01-10' },
-  { barcode: '10002346', catalog: 'Silk Touch', color: 'Crimson', degree: 'B', length: 120.0, status: 'Reserved', createdAt: '2024-01-12' },
-  { barcode: '10002347', catalog: 'Velvet Soft', color: 'Black', degree: 'A', length: 30.0, status: 'Sold', createdAt: '2024-01-15' },
+  {
+    id: '1',
+    barcode: '10002345',
+    catalogId: 'cat-1',
+    color: 'Royal Blue',
+    degree: 'A',
+    lengthMeters: 45.5,
+    status: 'in_stock',
+    location: 'A1',
+    createdAt: Date.parse('2024-01-10'),
+    createdBy: 'admin-1',
+    updatedAt: Date.parse('2024-01-10'),
+    updatedBy: 'admin-1',
+    deletedAt: null,
+    deletedBy: null,
+  },
+  {
+    id: '2',
+    barcode: '10002346',
+    catalogId: 'cat-2',
+    color: 'Crimson',
+    degree: 'B',
+    lengthMeters: 120.0,
+    status: 'reserved',
+    location: 'B3',
+    createdAt: Date.parse('2024-01-12'),
+    createdBy: 'admin-1',
+    updatedAt: Date.parse('2024-01-12'),
+    updatedBy: 'admin-1',
+    deletedAt: null,
+    deletedBy: null,
+  },
+  {
+    id: '3',
+    barcode: '10002347',
+    catalogId: 'cat-1',
+    color: 'Black',
+    degree: 'A',
+    lengthMeters: 30.0,
+    status: 'sold',
+    location: null,
+    createdAt: Date.parse('2024-01-15'),
+    createdBy: 'admin-1',
+    updatedAt: Date.parse('2024-01-15'),
+    updatedBy: 'admin-1',
+    deletedAt: null,
+    deletedBy: null,
+  },
 ];
 
 // Interface for the Filter Component
@@ -42,8 +87,10 @@ const RollsPage = () => {
 
   // Filter Logic
   const filteredRolls = rolls.filter(roll => {
-    const matchesSearch = roll.barcode.includes(search);
-    const matchesCatalog = filters.catalog ? roll.catalog === filters.catalog : true;
+    const matchesSearch = roll.barcode.toLowerCase().includes(search.toLowerCase()) ||
+      roll.catalogId.toLowerCase().includes(search.toLowerCase()) ||
+      roll.color.toLowerCase().includes(search.toLowerCase());
+    const matchesCatalog = filters.catalog ? roll.catalogId === filters.catalog : true;
     const matchesColor = filters.color ? roll.color === filters.color : true;
     const matchesDegree = filters.degree ? roll.degree === filters.degree : true;
 
@@ -134,17 +181,19 @@ const RollsPage = () => {
                 filteredRolls.map((roll) => (
                   <tr key={roll.barcode} className="hover:bg-gray-50/50 transition-colors group">
                     <td className="px-6 py-4 font-mono font-medium text-gray-900">{roll.barcode}</td>
-                    <td className="px-6 py-4 text-gray-600">{roll.catalog}</td>
-                    <td className="px-6 py-4 text-gray-600">
+                    <td className="px-6 py-4 text-sm text-gray-700">{roll.catalogId}</td>
+                    <td className="px-6 py-4 text-sm text-gray-700">
                       <div className="flex items-center gap-2">
                         <span className="w-3 h-3 rounded-full bg-blue-900 border border-gray-200"></span>
                         {roll.color}
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs font-bold">{roll.degree}</span>
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                        Degree {roll.degree}
+                      </span>
                     </td>
-                    <td className="px-6 py-4 font-medium">{roll.length}</td>
+                    <td className="px-6 py-4 text-sm text-gray-700">{roll.lengthMeters}m</td>
                     <td className="px-6 py-4">
                       <StatusBadge status={roll.status} />
                     </td>
@@ -155,7 +204,7 @@ const RollsPage = () => {
                             <Eye size={18} />
                           </button>
                         </Link>
-                        {['admin', 'editor'].includes(CURRENT_USER_ROLE) && (
+                        {['admin', 'storekeeper'].includes(CURRENT_USER_ROLE) && (
                           <button className="p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors">
                             <Edit3 size={18} />
                           </button>
@@ -202,17 +251,22 @@ const SelectFilter = ({ placeholder, value, onChange, options }: SelectFilterPro
   </div>
 );
 
-const StatusBadge = ({ status }: { status: string }) => {
-  const styles = {
-    'In Stock': 'bg-green-100 text-green-700 border-green-200',
-    'Sold': 'bg-gray-100 text-gray-600 border-gray-200',
-    'Reserved': 'bg-orange-100 text-orange-700 border-orange-200',
+const StatusBadge = ({ status }: { status: Roll['status'] }) => {
+  const styles: Record<Roll['status'], string> = {
+    'in_stock': 'bg-green-100 text-green-700 border-green-200',
+    'sold': 'bg-gray-100 text-gray-600 border-gray-200',
+    'reserved': 'bg-orange-100 text-orange-700 border-orange-200',
   };
-  const currentStyle = styles[status as keyof typeof styles] || styles['In Stock'];
+
+  const labels: Record<Roll['status'], string> = {
+    'in_stock': 'In Stock',
+    'sold': 'Sold',
+    'reserved': 'Reserved',
+  };
 
   return (
-    <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${currentStyle}`}>
-      {status}
+    <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium border ${styles[status]}`}>
+      {labels[status]}
     </span>
   );
 };

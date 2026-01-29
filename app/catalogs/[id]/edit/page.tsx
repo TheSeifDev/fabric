@@ -15,7 +15,7 @@ const EditCatalogPage = () => {
     name: 'Velvet Royal',
     code: 'CAT-2024-V',
     material: 'Velvet',
-    status: 'Active',
+    status: 'active', // Changed from 'Active'
     description: 'Premium royal velvet collection for luxury upholstery.',
   });
 

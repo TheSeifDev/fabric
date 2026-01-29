@@ -21,10 +21,11 @@ const AddRollPage = () => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     barcode: '',
-    catalog: '',
+    catalogId: '', // Changed from 'catalog'
     color: '',
-    degree: 'A',
-    length: '',
+    degree: 'A' as 'A' | 'B' | 'C', // Type the degree field
+    lengthMeters: '', // Changed from 'length'
+    location: '', // Added location field
   });
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -84,11 +85,11 @@ const AddRollPage = () => {
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormInput
-                label="Catalog"
-                name="catalog"
-                value={formData.catalog}
+                label="Catalog ID"
+                name="catalogId"
+                value={formData.catalogId}
                 onChange={handleChange}
-                placeholder="e.g. Velvet Soft"
+                placeholder="e.g. cat-001"
               />
               <FormInput
                 label="Color"
@@ -114,11 +115,19 @@ const AddRollPage = () => {
 
               <FormInput
                 label="Length (Meters)"
-                name="length"
+                name="lengthMeters"
                 type="number"
-                value={formData.length}
+                value={formData.lengthMeters}
                 onChange={handleChange}
-                placeholder="0.00"
+                placeholder="e.g. 50.5"
+              />
+
+              <FormInput
+                label="Location (Optional)"
+                name="location"
+                value={formData.location}
+                onChange={handleChange}
+                placeholder="e.g. A1, B3"
               />
             </div>
           </div>

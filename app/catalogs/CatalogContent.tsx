@@ -16,11 +16,50 @@ import {
 } from 'lucide-react';
 import { Catalog } from './types';
 
-// Mock Data
+// Mock Data (temporary - will be replaced with IPC calls)
 const initialCatalogs: Catalog[] = [
-  { id: '1', name: 'Velvet Royal', code: 'CAT-2024-V', material: 'Velvet', rollsCount: 145, status: 'Active', createdAt: '2024-01-15' },
-  { id: '2', name: 'Silk Road', code: 'CAT-2024-S', material: 'Silk', rollsCount: 89, status: 'Active', createdAt: '2024-02-10' },
-  { id: '3', name: 'Cotton Basic', code: 'CAT-2023-C', material: 'Cotton', rollsCount: 320, status: 'Archived', createdAt: '2023-11-05' },
+  {
+    id: '1',
+    code: 'CAT-2024-V',
+    name: 'Velvet Royal',
+    material: 'Velvet',
+    description: 'Premium velvet fabric with royal finish',
+    status: 'active',
+    createdAt: Date.parse('2024-01-15'),
+    createdBy: 'admin-1',
+    updatedAt: Date.parse('2024-01-15'),
+    updatedBy: 'admin-1',
+    deletedAt: null,
+    deletedBy: null,
+  },
+  {
+    id: '2',
+    code: 'CAT-2024-S',
+    name: 'Silk Road',
+    material: 'Silk',
+    description: 'Luxurious silk fabric for premium garments',
+    status: 'active',
+    createdAt: Date.parse('2024-02-10'),
+    createdBy: 'admin-1',
+    updatedAt: Date.parse('2024-02-10'),
+    updatedBy: 'admin-1',
+    deletedAt: null,
+    deletedBy: null,
+  },
+  {
+    id: '3',
+    code: 'CAT-2023-C',
+    name: 'Cotton Basic',
+    material: 'Cotton',
+    description: 'Basic cotton fabric for everyday use',
+    status: 'archived',
+    createdAt: Date.parse('2023-11-05'),
+    createdBy: 'admin-1',
+    updatedAt: Date.parse('2023-11-05'),
+    updatedBy: 'admin-1',
+    deletedAt: null,
+    deletedBy: null,
+  },
 ];
 
 const CatalogContent = () => {
@@ -78,7 +117,7 @@ const CatalogContent = () => {
       {/* --- Stats Overview --- */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <StatCard label="Total Catalogs" value={catalogs.length} icon={BookOpen} color="blue" />
-        <StatCard label="Active Collections" value={catalogs.filter(c => c.status === 'Active').length} icon={Layers} color="green" />
+        <StatCard label="Active Collections" value={catalogs.filter(c => c.status === 'active').length} icon={Layers} color="green" />
         <StatCard label="Total Rolls Linked" value="554" icon={Layers} color="purple" />
       </div>
 
@@ -143,7 +182,7 @@ const CatalogContent = () => {
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
                       <Layers size={16} className="text-gray-400" />
-                      <span className="text-sm font-medium text-gray-700">{catalog.rollsCount} Rolls</span>
+                      <span className="text-sm font-medium text-gray-700">-- Rolls</span>
                     </div>
                   </td>
 
@@ -203,15 +242,21 @@ const CatalogContent = () => {
 // --- Sub-Components ---
 
 const StatusBadge = ({ status }: { status: Catalog['status'] }) => {
-  const styles = {
-    'Active': 'bg-green-100 text-green-700 ring-green-600/20',
-    'Archived': 'bg-gray-100 text-gray-600 ring-gray-600/20',
-    'Draft': 'bg-orange-100 text-orange-700 ring-orange-600/20',
+  const styles: Record<Catalog['status'], string> = {
+    'active': 'bg-green-100 text-green-700 ring-green-600/20',
+    'archived': 'bg-gray-100 text-gray-600 ring-gray-600/20',
+    'draft': 'bg-orange-100 text-orange-700 ring-orange-600/20',
+  };
+
+  const labels: Record<Catalog['status'], string> = {
+    'active': 'Active',
+    'archived': 'Archived',
+    'draft': 'Draft',
   };
 
   return (
     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ring-1 ring-inset ${styles[status]}`}>
-      {status}
+      {labels[status]}
     </span>
   );
 };

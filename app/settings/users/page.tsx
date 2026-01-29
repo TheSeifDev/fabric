@@ -13,13 +13,66 @@ import {
   UserX
 } from 'lucide-react';
 import { User, UserRole } from './types';
+import { formatRelativeTime } from '@/lib/utils';
 
-// Mock Data
+// Mock Data (temporary - will be replaced with IPC calls)
 const initialUsers: User[] = [
-  { id: '1', name: 'John Doe', email: 'john@example.com', role: 'Admin', status: 'Active', lastLogin: '2 mins ago' },
-  { id: '2', name: 'Sarah Smith', email: 'sarah@example.com', role: 'Editor', status: 'Active', lastLogin: '1 day ago' },
-  { id: '3', name: 'Mike Johnson', email: 'mike@example.com', role: 'Viewer', status: 'Inactive', lastLogin: '2 weeks ago' },
-  { id: '4', name: 'Emily Davis', email: 'emily@example.com', role: 'Editor', status: 'Active', lastLogin: '5 hours ago' },
+  {
+    id: '1',
+    name: 'John Doe',
+    email: 'john@example.com',
+    role: 'admin',
+    status: 'active',
+    lastLogin: Date.now() - 2 * 60 * 1000, // 2 mins ago
+    createdAt: Date.now() - 30 * 24 * 60 * 60 * 1000,
+    createdBy: 'system',
+    updatedAt: Date.now(),
+    updatedBy: 'admin-1',
+    deletedAt: null,
+    deletedBy: null,
+  },
+  {
+    id: '2',
+    name: 'Sarah Smith',
+    email: 'sarah@example.com',
+    role: 'storekeeper',
+    status: 'active',
+    lastLogin: Date.now() - 24 * 60 * 60 * 1000, // 1 day ago
+    createdAt: Date.now() - 60 * 24 * 60 * 60 * 1000,
+    createdBy: 'admin-1',
+    updatedAt: Date.now() - 24 * 60 * 60 * 1000,
+    updatedBy: 'admin-1',
+    deletedAt: null,
+    deletedBy: null,
+  },
+  {
+    id: '3',
+    name: 'Mike Johnson',
+    email: 'mike@example.com',
+    role: 'viewer',
+    status: 'inactive',
+    lastLogin: Date.now() - 14 * 24 * 60 * 60 * 1000, // 2 weeks ago
+    createdAt: Date.now() - 90 * 24 * 60 * 60 * 1000,
+    createdBy: 'admin-1',
+    updatedAt: Date.now() - 14 * 24 * 60 * 60 * 1000,
+    updatedBy: 'admin-1',
+    deletedAt: null,
+    deletedBy: null,
+  },
+  {
+    id: '4',
+    name: 'Emily Davis',
+    email: 'emily@example.com',
+    role: 'storekeeper',
+    status: 'active',
+    lastLogin: Date.now() - 5 * 60 * 60 * 1000, // 5 hours ago
+    createdAt: Date.now() - 45 * 24 * 60 * 60 * 1000,
+    createdBy: 'admin-1',
+    updatedAt: Date.now() - 5 * 60 * 60 * 1000,
+    updatedBy: 'admin-1',
+    deletedAt: null,
+    deletedBy: null,
+  },
 ];
 
 const UsersPage = () => {
@@ -48,7 +101,7 @@ const UsersPage = () => {
 
   const toggleStatus = (id: string) => {
     setUsers(prev => prev.map(u => {
-      if (u.id === id) return { ...u, status: u.status === 'Active' ? 'Inactive' : 'Active' };
+      if (u.id === id) return { ...u, status: u.status === 'active' ? 'inactive' : 'active' };
       return u;
     }));
     setActiveMenuId(null);
@@ -131,16 +184,16 @@ const UsersPage = () => {
                   {/* Status Indicator */}
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${user.status === 'Active' ? 'bg-green-500' : 'bg-gray-300'}`} />
-                      <span className={`text-sm font-medium ${user.status === 'Active' ? 'text-gray-700' : 'text-gray-400'}`}>
-                        {user.status}
+                      <span className={`w-2 h-2 rounded-full ${user.status === 'active' ? 'bg-green-500' : 'bg-gray-300'}`} />
+                      <span className={`text-sm font-medium ${user.status === 'active' ? 'text-gray-700' : 'text-gray-400'}`}>
+                        {user.status.charAt(0).toUpperCase() + user.status.slice(1)}
                       </span>
                     </div>
                   </td>
 
                   {/* Last Login */}
                   <td className="px-6 py-4 text-sm text-gray-500">
-                    {user.lastLogin}
+                    {formatRelativeTime(user.lastLogin)}
                   </td>
 
                   {/* Actions Dropdown */}
@@ -167,8 +220,8 @@ const UsersPage = () => {
                               onClick={() => toggleStatus(user.id)}
                               className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 hover:text-orange-600 transition-colors text-left"
                             >
-                              {user.status === 'Active' ? <UserX size={16} /> : <UserCheck size={16} />}
-                              {user.status === 'Active' ? 'Deactivate' : 'Activate'}
+                              {user.status === 'active' ? <UserX size={16} /> : <UserCheck size={16} />}
+                              {user.status === 'active' ? 'Deactivate' : 'Activate'}
                             </button>
                             <div className="h-px bg-gray-100 my-1"></div>
                             <button
@@ -196,16 +249,22 @@ const UsersPage = () => {
 
 // --- Sub-Component: Role Badge ---
 const RoleBadge = ({ role }: { role: UserRole }) => {
-  const styles = {
-    'Admin': 'bg-purple-50 text-purple-700 border-purple-200',
-    'Editor': 'bg-blue-50 text-blue-700 border-blue-200',
-    'Viewer': 'bg-gray-50 text-gray-600 border-gray-200',
+  const styles: Record<UserRole, string> = {
+    'admin': 'bg-purple-50 text-purple-700 border-purple-200',
+    'storekeeper': 'bg-blue-50 text-blue-700 border-blue-200',
+    'viewer': 'bg-gray-50 text-gray-600 border-gray-200',
+  };
+
+  const roleLabels: Record<UserRole, string> = {
+    'admin': 'Admin',
+    'storekeeper': 'Storekeeper',
+    'viewer': 'Viewer',
   };
 
   return (
     <div className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md border text-xs font-medium ${styles[role]}`}>
       <Shield size={12} />
-      {role}
+      {roleLabels[role]}
     </div>
   );
 };

@@ -9,14 +9,14 @@ const RollDetailsPage = () => {
   const params = useParams();
   const { barcode } = params; // Get dynamic barcode from URL
 
-  // Mock Fetching Data based on barcode
+  // Mock Fetching Data based on barcode (will be replaced with IPC call)
   const rollData = {
     barcode: barcode,
-    catalog: 'Velvet Soft',
+    catalogId: 'velvet-soft', // Changed from 'catalog'
     color: 'Royal Blue',
     degree: 'A',
-    length: 45.5,
-    status: 'In Stock',
+    lengthMeters: 45.5, // Changed from 'length'
+    status: 'in_stock', // Changed from 'In Stock'
     createdAt: 'Jan 10, 2024 - 10:30 AM',
     createdBy: 'John Doe',
     location: 'Warehouse A - Rack 4',
@@ -24,7 +24,7 @@ const RollDetailsPage = () => {
 
   return (
     <div className="max-w-5xl mx-auto w-full pb-10">
-      
+
       {/* Navigation Header */}
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-4">
@@ -54,7 +54,7 @@ const RollDetailsPage = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
+
         {/* Left Column: Main Info */}
         <div className="lg:col-span-2 space-y-6">
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -65,10 +65,10 @@ const RollDetailsPage = () => {
               </h3>
             </div>
             <div className="p-6 grid grid-cols-2 gap-y-6 gap-x-8">
-              <InfoItem label="Catalog" value={rollData.catalog} />
+              <InfoItem label="Catalog ID" value={rollData.catalogId} />
               <InfoItem label="Color" value={rollData.color} />
               <InfoItem label="Degree" value={`Grade ${rollData.degree}`} />
-              <InfoItem label="Current Length" value={`${rollData.length} meters`} />
+              <InfoItem label="Length" value={`${rollData.lengthMeters} meters`} />
               <InfoItem label="Location" value={rollData.location} />
               <InfoItem label="Created By" value={rollData.createdBy} />
             </div>
@@ -76,11 +76,11 @@ const RollDetailsPage = () => {
 
           {/* History Placeholder */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 opacity-60">
-             <div className="flex items-center gap-2 mb-4">
-                <History className="text-gray-400" size={20} />
-                <h3 className="font-semibold text-gray-800">History Log</h3>
-             </div>
-             <p className="text-sm text-gray-500">History timeline (Movements, Cuts, Returns) will be implemented here.</p>
+            <div className="flex items-center gap-2 mb-4">
+              <History className="text-gray-400" size={20} />
+              <h3 className="font-semibold text-gray-800">History Log</h3>
+            </div>
+            <p className="text-sm text-gray-500">History timeline (Movements, Cuts, Returns) will be implemented here.</p>
           </div>
         </div>
 
@@ -89,22 +89,22 @@ const RollDetailsPage = () => {
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Metadata</h3>
             <div className="space-y-4">
-               <div className="flex items-start gap-3">
-                  <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
-                    <Calendar size={18} />
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Created At</p>
-                    <p className="text-sm font-medium text-gray-900">{rollData.createdAt}</p>
-                  </div>
-               </div>
-               {/* Barcode Display */}
-               <div className="pt-4 mt-4 border-t border-gray-100">
-                  <p className="text-xs text-gray-500 mb-2">Barcode Preview</p>
-                  <div className="h-16 bg-gray-100 rounded-lg flex items-center justify-center font-mono text-gray-400 tracking-widest border border-dashed border-gray-300">
-                    ||| || ||| ||
-                  </div>
-               </div>
+              <div className="flex items-start gap-3">
+                <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                  <Calendar size={18} />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500">Created At</p>
+                  <p className="text-sm font-medium text-gray-900">{rollData.createdAt}</p>
+                </div>
+              </div>
+              {/* Barcode Display */}
+              <div className="pt-4 mt-4 border-t border-gray-100">
+                <p className="text-xs text-gray-500 mb-2">Barcode Preview</p>
+                <div className="h-16 bg-gray-100 rounded-lg flex items-center justify-center font-mono text-gray-400 tracking-widest border border-dashed border-gray-300">
+                  ||| || ||| ||
+                </div>
+              </div>
             </div>
           </div>
         </div>
