@@ -4,6 +4,7 @@
  */
 
 import type { Catalog, CreateCatalogDTO, UpdateCatalogDTO, APIResponse } from '@/lib/electron-api.d';
+import { NotFoundError, ConflictError, ValidationError, DatabaseError, BusinessError, normalizeError } from '@/lib/errors';
 
 class CatalogService {
     /**
@@ -38,16 +39,18 @@ class CatalogService {
                 const response: APIResponse<Catalog> = await window.electronAPI.catalogs.getById(id);
 
                 if (!response.success) {
-                    throw new Error(response.error.message);
+                    if (response.error.code === 'NOT_FOUND') {
+                        throw new NotFoundError('Catalog', id);
+                    }
+                    throw new DatabaseError(response.error.message, response.error.code);
                 }
 
                 return response.data;
             }
 
-            throw new Error('electronAPI not available');
+            throw new DatabaseError('electronAPI not available');
         } catch (error) {
-            console.error('CatalogService.getById error:', error);
-            throw error;
+            throw normalizeError(error);
         }
     }
 
@@ -60,16 +63,21 @@ class CatalogService {
                 const response: APIResponse<Catalog> = await window.electronAPI.catalogs.create(data);
 
                 if (!response.success) {
-                    throw new Error(response.error.message);
+                    if (response.error.code === 'CONFLICT') {
+                        throw new ConflictError(response.error.message, 'code');
+                    }
+                    if (response.error.code === 'VALIDATION_ERROR') {
+                        throw new ValidationError(response.error.message);
+                    }
+                    throw new DatabaseError(response.error.message, response.error.code);
                 }
 
                 return response.data;
             }
 
-            throw new Error('electronAPI not available');
+            throw new DatabaseError('electronAPI not available');
         } catch (error) {
-            console.error('CatalogService.create error:', error);
-            throw error;
+            throw normalizeError(error);
         }
     }
 
@@ -104,23 +112,29 @@ class CatalogService {
             const rollsCount = await this.getRollsCount(id);
 
             if (rollsCount > 0) {
-                throw new Error(`Cannot delete catalog with ${rollsCount} associated rolls`);
+                throw new BusinessError(
+                    `Cannot delete catalog with ${rollsCount} associated rolls`,
+                    'CATALOG_HAS_ROLLS',
+                    { rollsCount }
+                );
             }
 
             if (typeof window !== 'undefined' && window.electronAPI) {
                 const response: APIResponse<null> = await window.electronAPI.catalogs.delete(id);
 
                 if (!response.success) {
-                    throw new Error(response.error.message);
+                    if (response.error.code === 'NOT_FOUND') {
+                        throw new NotFoundError('Catalog', id);
+                    }
+                    throw new DatabaseError(response.error.message, response.error.code);
                 }
 
                 return;
             }
 
-            throw new Error('electronAPI not available');
+            throw new DatabaseError('electronAPI not available');
         } catch (error) {
-            console.error('CatalogService.delete error:', error);
-            throw error;
+            throw normalizeError(error);
         }
     }
 

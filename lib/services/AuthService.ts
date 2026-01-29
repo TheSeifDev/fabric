@@ -4,6 +4,7 @@
  */
 
 import type { User, APIResponse } from '@/lib/electron-api.d';
+import { AuthError, DatabaseError, normalizeError } from '@/lib/errors';
 
 class AuthService {
     /**
@@ -16,7 +17,13 @@ class AuthService {
                     await window.electronAPI.auth.login(email, password);
 
                 if (!response.success) {
-                    throw new Error(response.error.message);
+                    if (response.error.code === 'AUTH_INVALID') {
+                        throw new AuthError('Invalid email or password', 'AUTH_INVALID');
+                    }
+                    if (response.error.code === 'AUTH_REQUIRED') {
+                        throw new AuthError('Authentication required', 'AUTH_REQUIRED');
+                    }
+                    throw new DatabaseError(response.error.message, response.error.code);
                 }
 
                 // Store token in localStorage
@@ -28,10 +35,9 @@ class AuthService {
                 return response.data;
             }
 
-            throw new Error('electronAPI not available');
+            throw new DatabaseError('electronAPI not available');
         } catch (error) {
-            console.error('AuthService.login error:', error);
-            throw error;
+            throw normalizeError(error);
         }
     }
 
@@ -44,7 +50,7 @@ class AuthService {
                 const response: APIResponse<null> = await window.electronAPI.auth.logout();
 
                 if (!response.success) {
-                    throw new Error(response.error.message);
+                    throw new DatabaseError(response.error.message, response.error.code);
                 }
 
                 // Clear local storage
@@ -56,10 +62,9 @@ class AuthService {
                 return;
             }
 
-            throw new Error('electronAPI not available');
+            throw new DatabaseError('electronAPI not available');
         } catch (error) {
-            console.error('AuthService.logout error:', error);
-            throw error;
+            throw normalizeError(error);
         }
     }
 

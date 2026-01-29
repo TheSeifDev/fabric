@@ -75,7 +75,7 @@ export interface Catalog extends AuditFields {
     code: string;
     name: string;
     material: string;
-    description?: string;
+    description: string;
     status: CatalogStatus;
     image?: string;
 }

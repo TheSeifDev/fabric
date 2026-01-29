@@ -4,6 +4,7 @@
  */
 
 import type { User, CreateUserDTO, UpdateUserDTO, APIResponse } from '@/lib/electron-api.d';
+import { NotFoundError, ConflictError, ValidationError, DatabaseError, AuthError, normalizeError } from '@/lib/errors';
 
 class UserService {
     /**
@@ -38,16 +39,18 @@ class UserService {
                 const response: APIResponse<User> = await window.electronAPI.users.getById(id);
 
                 if (!response.success) {
-                    throw new Error(response.error.message);
+                    if (response.error.code === 'NOT_FOUND') {
+                        throw new NotFoundError('User', id);
+                    }
+                    throw new DatabaseError(response.error.message, response.error.code);
                 }
 
                 return response.data;
             }
 
-            throw new Error('electronAPI not available');
+            throw new DatabaseError('electronAPI not available');
         } catch (error) {
-            console.error('UserService.getById error:', error);
-            throw error;
+            throw normalizeError(error);
         }
     }
 
@@ -59,23 +62,28 @@ class UserService {
             // Validate email uniqueness
             const isUnique = await this.isEmailUnique(data.email);
             if (!isUnique) {
-                throw new Error('Email already exists');
+                throw new ConflictError('Email already exists', 'email');
             }
 
             if (typeof window !== 'undefined' && window.electronAPI) {
                 const response: APIResponse<User> = await window.electronAPI.users.create(data);
 
                 if (!response.success) {
-                    throw new Error(response.error.message);
+                    if (response.error.code === 'CONFLICT') {
+                        throw new ConflictError(response.error.message, 'email');
+                    }
+                    if (response.error.code === 'VALIDATION_ERROR') {
+                        throw new ValidationError(response.error.message);
+                    }
+                    throw new DatabaseError(response.error.message, response.error.code);
                 }
 
                 return response.data;
             }
 
-            throw new Error('electronAPI not available');
+            throw new DatabaseError('electronAPI not available');
         } catch (error) {
-            console.error('UserService.create error:', error);
-            throw error;
+            throw normalizeError(error);
         }
     }
 
@@ -88,7 +96,7 @@ class UserService {
             if (data.email) {
                 const isUnique = await this.isEmailUnique(data.email, id);
                 if (!isUnique) {
-                    throw new Error('Email already exists');
+                    throw new ConflictError('Email already exists', 'email');
                 }
             }
 
@@ -96,16 +104,21 @@ class UserService {
                 const response: APIResponse<User> = await window.electronAPI.users.update(id, data);
 
                 if (!response.success) {
-                    throw new Error(response.error.message);
+                    if (response.error.code === 'NOT_FOUND') {
+                        throw new NotFoundError('User', id);
+                    }
+                    if (response.error.code === 'CONFLICT') {
+                        throw new ConflictError(response.error.message, 'email');
+                    }
+                    throw new DatabaseError(response.error.message, response.error.code);
                 }
 
                 return response.data;
             }
 
-            throw new Error('electronAPI not available');
+            throw new DatabaseError('electronAPI not available');
         } catch (error) {
-            console.error('UserService.update error:', error);
-            throw error;
+            throw normalizeError(error);
         }
     }
 
@@ -144,16 +157,21 @@ class UserService {
                 );
 
                 if (!response.success) {
-                    throw new Error(response.error.message);
+                    if (response.error.code === 'AUTH_INVALID') {
+                        throw new AuthError('Current password is incorrect', 'AUTH_INVALID');
+                    }
+                    if (response.error.code === 'VALIDATION_ERROR') {
+                        throw new ValidationError(response.error.message);
+                    }
+                    throw new DatabaseError(response.error.message, response.error.code);
                 }
 
                 return;
             }
 
-            throw new Error('electronAPI not available');
+            throw new DatabaseError('electronAPI not available');
         } catch (error) {
-            console.error('UserService.updatePassword error:', error);
-            throw error;
+            throw normalizeError(error);
         }
     }
 

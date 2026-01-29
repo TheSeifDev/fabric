@@ -13,6 +13,8 @@ import { createRollSchema, type CreateRollInput } from '@/lib/validation/schemas
 import { FormField } from '@/components/ui/FormField';
 import { FormSelect } from '@/components/ui/FormSelect';
 import { useRolls } from '@/hooks/useRolls';
+import { FormErrorBoundary } from '@/components/ErrorBoundary';
+import { isValidationError, isConflictError } from '@/lib/errors';
 
 const AddRollPage = () => {
   const router = useRouter();
@@ -82,7 +84,15 @@ const AddRollPage = () => {
       }
     } catch (error) {
       console.error('Form submission error:', error);
-      setServerError(error instanceof Error ? error.message : 'An unexpected error occurred');
+
+      // Handle specific error types
+      if (isConflictError(error)) {
+        setErrors({ barcode: 'This barcode already exists in the system' });
+      } else if (isValidationError(error)) {
+        setServerError(error.message);
+      } else {
+        setServerError(error instanceof Error ? error.message : 'An unexpected error occurred');
+      }
     } finally {
       setLoading(false);
     }

@@ -5,6 +5,7 @@
  */
 
 import type { Roll, CreateRollDTO, UpdateRollDTO, RollFilters, APIResponse } from '@/lib/electron-api.d';
+import { NotFoundError, ConflictError, ValidationError, DatabaseError, normalizeError } from '@/lib/errors';
 
 class RollService {
     /**
@@ -43,16 +44,18 @@ class RollService {
                 const response: APIResponse<Roll> = await window.electronAPI.rolls.getById(id);
 
                 if (!response.success) {
-                    throw new Error(response.error.message);
+                    if (response.error.code === 'NOT_FOUND') {
+                        throw new NotFoundError('Roll', id);
+                    }
+                    throw new DatabaseError(response.error.message, response.error.code);
                 }
 
                 return response.data;
             }
 
-            throw new Error('electronAPI not available');
+            throw new DatabaseError('electronAPI not available');
         } catch (error) {
-            console.error('RollService.getById error:', error);
-            throw error;
+            throw normalizeError(error);
         }
     }
 
@@ -87,16 +90,21 @@ class RollService {
                 const response: APIResponse<Roll> = await window.electronAPI.rolls.create(data);
 
                 if (!response.success) {
-                    throw new Error(response.error.message);
+                    if (response.error.code === 'CONFLICT') {
+                        throw new ConflictError(response.error.message, 'barcode');
+                    }
+                    if (response.error.code === 'VALIDATION_ERROR') {
+                        throw new ValidationError(response.error.message);
+                    }
+                    throw new DatabaseError(response.error.message, response.error.code);
                 }
 
                 return response.data;
             }
 
-            throw new Error('electronAPI not available');
+            throw new DatabaseError('electronAPI not available');
         } catch (error) {
-            console.error('RollService.create error:', error);
-            throw error;
+            throw normalizeError(error);
         }
     }
 
