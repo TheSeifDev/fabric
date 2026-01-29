@@ -22,7 +22,7 @@ export const createRollSchema = z.object({
         .max(50, 'Color name too long'),
 
     degree: z.enum(['A', 'B', 'C'], {
-        errorMap: () => ({ message: 'Degree must be A, B, or C' }),
+        message: 'Degree must be A, B, or C',
     }),
 
     lengthMeters: z.coerce.number()
@@ -32,7 +32,7 @@ export const createRollSchema = z.object({
     location: z.string()
         .max(20, 'Location too long')
         .optional()
-        .nullable(),
+        .transform((val) => val || undefined), // Convert empty strings and null to undefined
 });
 
 export const updateRollSchema = createRollSchema.partial();
@@ -59,7 +59,7 @@ export const createCatalogSchema = z.object({
         .nullable(),
 
     status: z.enum(['active', 'archived', 'draft'], {
-        errorMap: () => ({ message: 'Invalid status' }),
+        message: 'Invalid status',
     }).default('active'),
 });
 
@@ -80,7 +80,7 @@ export const createUserSchema = z.object({
         .toLowerCase(),
 
     role: z.enum(['admin', 'storekeeper', 'viewer'], {
-        errorMap: () => ({ message: 'Invalid role' }),
+        message: 'Invalid role',
     }),
 
     password: z.string()
@@ -91,7 +91,7 @@ export const createUserSchema = z.object({
         .regex(/[0-9]/, 'Password must contain at least one number'),
 
     status: z.enum(['active', 'inactive'], {
-        errorMap: () => ({ message: 'Invalid status' }),
+        message: 'Invalid status',
     }).default('active'),
 });
 
