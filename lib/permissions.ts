@@ -10,6 +10,9 @@ import { UserRole } from './electron-api.d';
 // ============================================
 
 export type Permission =
+    // Wildcard permission (all permissions)
+    | '*'
+
     // Roll permissions
     | 'rolls:read'
     | 'rolls:create'
@@ -46,7 +49,7 @@ export type Permission =
  * Defines what each role can do
  * '*' means all permissions
  */
-export const ROLE_PERMISSIONS: Record<UserRole, Permission[] | ['*']> = {
+export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     // Admin: Full access to everything
     admin: ['*'],
 
@@ -84,7 +87,7 @@ export function hasPermission(role: UserRole, permission: Permission): boolean {
     const rolePermissions = ROLE_PERMISSIONS[role];
 
     // Admin has all permissions
-    if (rolePermissions.includes('*' as Permission)) {
+    if (rolePermissions.includes('*')) {
         return true;
     }
 
@@ -120,10 +123,10 @@ export function getRolePermissions(role: UserRole): Permission[] {
     const permissions = ROLE_PERMISSIONS[role];
 
     // If admin (has '*'), return all possible permissions
-    if (permissions.includes('*' as Permission)) {
+    if (permissions.includes('*')) {
         return Object.keys(ROLE_PERMISSIONS).reduce((all, r) => {
             const rolePerms = ROLE_PERMISSIONS[r as UserRole];
-            if (!rolePerms.includes('*' as Permission)) {
+            if (!rolePerms.includes('*')) {
                 rolePerms.forEach(p => {
                     if (!all.includes(p)) all.push(p);
                 });
@@ -210,6 +213,7 @@ export function isSidebarItemVisible(role: UserRole, menuItem: string): boolean 
 // ============================================
 
 export const PERMISSION_LABELS: Record<Permission, string> = {
+    '*': 'All Permissions',
     'rolls:read': 'View Rolls',
     'rolls:create': 'Create Rolls',
     'rolls:update': 'Edit Rolls',

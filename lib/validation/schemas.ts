@@ -56,7 +56,7 @@ export const createCatalogSchema = z.object({
     description: z.string()
         .max(500, 'Description too long')
         .optional()
-        .nullable(),
+        .transform((val) => val || undefined), // Convert empty strings and null to undefined
 
     status: z.enum(['active', 'archived', 'draft'], {
         message: 'Invalid status',

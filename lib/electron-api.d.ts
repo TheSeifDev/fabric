@@ -75,7 +75,7 @@ export interface Catalog extends AuditFields {
     code: string;
     name: string;
     material: string;
-    description: string;
+    description?: string;
     status: CatalogStatus;
     image?: string;
 }
@@ -84,7 +84,7 @@ export interface CreateCatalogDTO {
     code: string;
     name: string;
     material: string;
-    description: string;
+    description?: string;
     status?: CatalogStatus;
     image?: string;
 }
