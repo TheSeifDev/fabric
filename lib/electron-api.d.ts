@@ -58,6 +58,7 @@ export interface UpdateRollDTO {
 }
 
 export interface RollFilters {
+    search?: string;
     catalog?: UUID;
     color?: string;
     degree?: RollDegree;
