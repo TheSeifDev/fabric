@@ -15,11 +15,15 @@ import { FormSelect } from '@/components/ui/FormSelect';
 import { useRolls } from '@/hooks/useRolls';
 import { FormErrorBoundary } from '@/components/ErrorBoundary';
 import { isValidationError, isConflictError } from '@/lib/errors';
+import { getAllCatalogs } from '@/lib/api/catalogs';
+import type { Catalog } from '@/lib/electron-api.d';
 
 const AddRollPage = () => {
   const router = useRouter();
   const { createRoll } = useRolls();
   const [loading, setLoading] = useState(false);
+  const [catalogs, setCatalogs] = useState<Catalog[]>([]);
+  const [loadingCatalogs, setLoadingCatalogs] = useState(true);
 
   const [formData, setFormData] = useState<CreateRollInput>({
     barcode: '',
@@ -32,6 +36,22 @@ const AddRollPage = () => {
 
   const [errors, setErrors] = useState<Partial<Record<keyof CreateRollInput, string>>>({});
   const [serverError, setServerError] = useState<string | null>(null);
+
+  // Load catalogs on mount
+  React.useEffect(() => {
+    async function loadCatalogs() {
+      try {
+        const data = await getAllCatalogs();
+        setCatalogs(data.filter(c => c.status === 'active'));
+      } catch (error) {
+        console.error('Failed to load catalogs:', error);
+        setServerError('Failed to load catalogs. Please refresh the page.');
+      } finally {
+        setLoadingCatalogs(false);
+      }
+    }
+    loadCatalogs();
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -142,14 +162,21 @@ const AddRollPage = () => {
               <Box size={16} className="text-blue-600" /> Specifications
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FormField
-                label="Catalog ID"
+              <FormSelect
+                label="Catalog"
                 name="catalogId"
                 value={formData.catalogId}
                 onChange={handleChange}
                 error={errors.catalogId}
-                placeholder="e.g. cat-001"
                 required
+                disabled={loadingCatalogs}
+                options={[
+                  { value: '', label: loadingCatalogs ? 'Loading catalogs...' : 'Select a catalog' },
+                  ...catalogs.map(catalog => ({
+                    value: catalog.id,
+                    label: `${catalog.code} - ${catalog.name} (${catalog.material})`
+                  }))
+                ]}
               />
 
               <FormField
