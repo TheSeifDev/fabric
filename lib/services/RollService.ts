@@ -6,6 +6,12 @@
 
 import type { Roll, CreateRollDTO, UpdateRollDTO, RollFilters, APIResponse } from '@/lib/electron-api.d';
 import { NotFoundError, ConflictError, ValidationError, DatabaseError, normalizeError } from '@/lib/errors';
+import {
+    validateRollCreate,
+    validateRollUpdate,
+    validateBarcodeAvailable,
+    validateStatusTransition
+} from '@/lib/business-rules';
 
 class RollService {
     /**
@@ -86,6 +92,13 @@ class RollService {
      */
     async create(data: CreateRollDTO): Promise<Roll> {
         try {
+            // Business rule validation
+            validateRollCreate(data);
+
+            // Check barcode availability
+            const allRolls = await this.getAll();
+            await validateBarcodeAvailable(data.barcode, allRolls);
+
             if (typeof window !== 'undefined' && window.electronAPI) {
                 const response: APIResponse<Roll> = await window.electronAPI.rolls.create(data);
 
@@ -113,6 +126,18 @@ class RollService {
      */
     async update(id: string, data: UpdateRollDTO): Promise<Roll> {
         try {
+            // Get current roll to validate against
+            const currentRoll = await this.getById(id);
+
+            // Business rule validation
+            validateRollUpdate(currentRoll, data);
+
+            // If barcode is being updated, validate availability
+            if (data.barcode && data.barcode !== currentRoll.barcode) {
+                const allRolls = await this.getAll();
+                await validateBarcodeAvailable(data.barcode, allRolls, id);
+            }
+
             if (typeof window !== 'undefined' && window.electronAPI) {
                 const response: APIResponse<Roll> = await window.electronAPI.rolls.update(id, data);
 

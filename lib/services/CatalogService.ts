@@ -5,6 +5,12 @@
 
 import type { Catalog, CreateCatalogDTO, UpdateCatalogDTO, APIResponse } from '@/lib/electron-api.d';
 import { NotFoundError, ConflictError, ValidationError, DatabaseError, BusinessError, normalizeError } from '@/lib/errors';
+import {
+    validateCatalogCreate,
+    validateCatalogUpdate,
+    validateCatalogDelete,
+    validateCatalogCodeUnique
+} from '@/lib/business-rules';
 
 class CatalogService {
     /**
@@ -59,6 +65,13 @@ class CatalogService {
      */
     async create(data: CreateCatalogDTO): Promise<Catalog> {
         try {
+            // Business rule validation
+            validateCatalogCreate(data);
+
+            // Check code uniqueness
+            const allCatalogs = await this.getAll();
+            validateCatalogCodeUnique(data.code, allCatalogs);
+
             if (typeof window !== 'undefined' && window.electronAPI) {
                 const response: APIResponse<Catalog> = await window.electronAPI.catalogs.create(data);
 
@@ -86,6 +99,16 @@ class CatalogService {
      */
     async update(id: string, data: UpdateCatalogDTO): Promise<Catalog> {
         try {
+            // Get current catalog
+            const currentCatalog = await this.getById(id);
+
+            // Get rolls count for validation
+            const rollsCount = await this.getRollsCount(id);
+            const hasRolls = rollsCount > 0;
+
+            // Business rule validation
+            validateCatalogUpdate(currentCatalog, data, hasRolls);
+
             if (typeof window !== 'undefined' && window.electronAPI) {
                 const response: APIResponse<Catalog> = await window.electronAPI.catalogs.update(id, data);
 
@@ -108,16 +131,12 @@ class CatalogService {
      */
     async delete(id: string): Promise<void> {
         try {
-            // Check if catalog has rolls first
+            // Get catalog and rolls count
+            const catalog = await this.getById(id);
             const rollsCount = await this.getRollsCount(id);
 
-            if (rollsCount > 0) {
-                throw new BusinessError(
-                    `Cannot delete catalog with ${rollsCount} associated rolls`,
-                    'CATALOG_HAS_ROLLS',
-                    { rollsCount }
-                );
-            }
+            // Business rule validation
+            validateCatalogDelete(catalog, rollsCount);
 
             if (typeof window !== 'undefined' && window.electronAPI) {
                 const response: APIResponse<null> = await window.electronAPI.catalogs.delete(id);
