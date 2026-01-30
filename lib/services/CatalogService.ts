@@ -1,38 +1,34 @@
 /**
- * Catalog Service
- * Handles all catalog-related business logic and data access
+ * Catalog Service (Database-Enabled)
+ * Handles all catalog-related business logic with direct database access
  */
 
-import type { Catalog, CreateCatalogDTO, UpdateCatalogDTO, APIResponse } from '@/lib/electron-api.d';
-import { NotFoundError, ConflictError, ValidationError, DatabaseError, BusinessError, normalizeError } from '@/lib/errors';
+import type { Catalog, CreateCatalogDTO, UpdateCatalogDTO } from '@/lib/electron-api.d';
+import { NotFoundError, ConflictError, ValidationError, DatabaseError, BusinessError } from '@/lib/errors';
 import {
     validateCatalogCreate,
     validateCatalogUpdate,
     validateCatalogDelete,
-    validateCatalogCodeUnique
+    validateCatalogCodeUnique,
 } from '@/lib/business-rules';
+import { getCatalogRepository, getAuditRepository } from '@/database/repositories';
+import type { NewCatalog } from '@/database/schema';
+import { generateUUID } from '@/lib/utils';
 
 class CatalogService {
+    private catalogRepo = getCatalogRepository();
+    private auditRepo = getAuditRepository();
+
     /**
      * Get all catalogs
      */
     async getAll(): Promise<Catalog[]> {
         try {
-            if (typeof window !== 'undefined' && window.electronAPI) {
-                const response: APIResponse<Catalog[]> = await window.electronAPI.catalogs.getAll();
-
-                if (!response.success) {
-                    throw new Error(response.error.message);
-                }
-
-                return response.data;
-            }
-
-            console.warn('electronAPI not available, returning empty array');
-            return [];
+            const catalogs = this.catalogRepo.findAll();
+            return catalogs.map(this.mapToAPI);
         } catch (error) {
             console.error('CatalogService.getAll error:', error);
-            throw error;
+            throw new DatabaseError('Failed to fetch catalogs');
         }
     }
 
@@ -41,160 +37,217 @@ class CatalogService {
      */
     async getById(id: string): Promise<Catalog> {
         try {
-            if (typeof window !== 'undefined' && window.electronAPI) {
-                const response: APIResponse<Catalog> = await window.electronAPI.catalogs.getById(id);
+            const catalog = this.catalogRepo.findById(id);
 
-                if (!response.success) {
-                    if (response.error.code === 'NOT_FOUND') {
-                        throw new NotFoundError('Catalog', id);
-                    }
-                    throw new DatabaseError(response.error.message, response.error.code);
-                }
-
-                return response.data;
+            if (!catalog) {
+                throw new NotFoundError('Catalog', id);
             }
 
-            throw new DatabaseError('electronAPI not available');
+            return this.mapToAPI(catalog);
         } catch (error) {
-            throw normalizeError(error);
+            if (error instanceof NotFoundError) throw error;
+            console.error('CatalogService.getById error:', error);
+            throw new DatabaseError('Failed to fetch catalog');
+        }
+    }
+
+    /**
+     * Get a catalog by code
+     */
+    async getByCode(code: string): Promise<Catalog | null> {
+        try {
+            const catalog = this.catalogRepo.findByCode(code);
+            return catalog ? this.mapToAPI(catalog) : null;
+        } catch (error) {
+            console.error('CatalogService.getByCode error:', error);
+            throw new DatabaseError('Failed to fetch catalog by code');
         }
     }
 
     /**
      * Create a new catalog
      */
-    async create(data: CreateCatalogDTO): Promise<Catalog> {
+    async create(data: CreateCatalogDTO, userId?: string): Promise<Catalog> {
         try {
-            // Business rule validation
+            // 1. Validate catalog data
             validateCatalogCreate(data);
 
-            // Check code uniqueness
-            const allCatalogs = await this.getAll();
-            validateCatalogCodeUnique(data.code, allCatalogs);
-
-            if (typeof window !== 'undefined' && window.electronAPI) {
-                const response: APIResponse<Catalog> = await window.electronAPI.catalogs.create(data);
-
-                if (!response.success) {
-                    if (response.error.code === 'CONFLICT') {
-                        throw new ConflictError(response.error.message, 'code');
-                    }
-                    if (response.error.code === 'VALIDATION_ERROR') {
-                        throw new ValidationError(response.error.message);
-                    }
-                    throw new DatabaseError(response.error.message, response.error.code);
-                }
-
-                return response.data;
+            // 2. Check if code exists in DB
+            if (this.catalogRepo.codeExists(data.code)) {
+                throw new ConflictError(
+                    `Catalog code ${data.code} already exists`,
+                    'code'
+                );
             }
 
-            throw new DatabaseError('electronAPI not available');
+            // 4. Create catalog in database
+            const now = new Date();
+            const newCatalog: NewCatalog = {
+                id: generateUUID(),
+                code: data.code,
+                name: data.name,
+                material: data.material,
+                description: data.description || null,
+                status: data.status || 'active',
+                image: data.image || null,
+                createdAt: now,
+                updatedAt: now,
+                createdBy: userId || null,
+                updatedBy: userId || null,
+            };
+
+            const created = this.catalogRepo.create(newCatalog);
+
+            // 5. Audit log
+            if (userId) {
+                this.auditRepo.logCreate('catalog', created.id, userId, data);
+            }
+
+            return this.mapToAPI(created);
         } catch (error) {
-            throw normalizeError(error);
+            if (error instanceof ConflictError || error instanceof ValidationError) {
+                throw error;
+            }
+            console.error('CatalogService.create error:', error);
+            throw new DatabaseError('Failed to create catalog');
         }
     }
 
     /**
-     * Update an existing catalog
+     * Update a catalog
      */
-    async update(id: string, data: UpdateCatalogDTO): Promise<Catalog> {
+    async update(id: string, data: UpdateCatalogDTO, userId?: string): Promise<Catalog> {
         try {
-            // Get current catalog
-            const currentCatalog = await this.getById(id);
-
-            // Get rolls count for validation
-            const rollsCount = await this.getRollsCount(id);
-            const hasRolls = rollsCount > 0;
-
-            // Business rule validation
-            validateCatalogUpdate(currentCatalog, data, hasRolls);
-
-            if (typeof window !== 'undefined' && window.electronAPI) {
-                const response: APIResponse<Catalog> = await window.electronAPI.catalogs.update(id, data);
-
-                if (!response.success) {
-                    throw new Error(response.error.message);
-                }
-
-                return response.data;
+            // 1. Get existing catalog
+            const existing = this.catalogRepo.findById(id);
+            if (!existing) {
+                throw new NotFoundError('Catalog', id);
             }
 
-            throw new Error('electronAPI not available');
+            // 2. Check if archiving with active rolls
+            if (data.status === 'archived' && existing.status !== 'archived') {
+                const activeRollCount = this.catalogRepo.getActiveRollCount(id);
+                if (activeRollCount > 0) {
+                    throw new BusinessError(
+                        `Cannot archive catalog with ${activeRollCount} active roll(s). Please sell or remove all rolls first.`,
+                        'CATALOG_HAS_ACTIVE_ROLLS',
+                        { catalogId: id, activeRollCount }
+                    );
+                }
+            }
+
+            // 3. Update catalog in database
+            const updateData: Partial<NewCatalog> = {
+                ...(data.name && { name: data.name }),
+                ...(data.material && { material: data.material }),
+                ...(data.description !== undefined && { description: data.description || null }),
+                ...(data.status && { status: data.status }),
+                ...(data.image !== undefined && { image: data.image || null }),
+                updatedBy: userId || 'system',
+            };
+
+            const updated = this.catalogRepo.update(id, updateData);
+
+            // 6. Audit log
+            if (userId) {
+                this.auditRepo.logUpdate('catalog', id, userId, data);
+            }
+
+            return this.mapToAPI(updated);
         } catch (error) {
+            if (
+                error instanceof NotFoundError ||
+                error instanceof ConflictError ||
+                error instanceof ValidationError ||
+                error instanceof BusinessError
+            ) {
+                throw error;
+            }
             console.error('CatalogService.update error:', error);
-            throw error;
+            throw new DatabaseError('Failed to update catalog');
         }
     }
 
     /**
-     * Delete a catalog (soft delete)
+     * Delete a catalog
      */
-    async delete(id: string): Promise<void> {
+    async delete(id: string, userId?: string): Promise<void> {
         try {
-            // Get catalog and rolls count
-            const catalog = await this.getById(id);
-            const rollsCount = await this.getRollsCount(id);
-
-            // Business rule validation
-            validateCatalogDelete(catalog, rollsCount);
-
-            if (typeof window !== 'undefined' && window.electronAPI) {
-                const response: APIResponse<null> = await window.electronAPI.catalogs.delete(id);
-
-                if (!response.success) {
-                    if (response.error.code === 'NOT_FOUND') {
-                        throw new NotFoundError('Catalog', id);
-                    }
-                    throw new DatabaseError(response.error.message, response.error.code);
-                }
-
-                return;
+            // 1. Get existing catalog
+            const existing = this.catalogRepo.findById(id);
+            if (!existing) {
+                throw new NotFoundError('Catalog', id);
             }
 
-            throw new DatabaseError('electronAPI not available');
-        } catch (error) {
-            throw normalizeError(error);
-        }
-    }
-
-    /**
-     * Get count of rolls for a catalog
-     */
-    async getRollsCount(catalogId: string): Promise<number> {
-        try {
-            if (typeof window !== 'undefined' && window.electronAPI) {
-                const response: APIResponse<number> = await window.electronAPI.catalogs.getRollsCount(catalogId);
-
-                if (!response.success) {
-                    throw new Error(response.error.message);
-                }
-
-                return response.data;
+            // 2. Check if catalog has any rolls
+            const rollCount = this.catalogRepo.getRollCount(id);
+            if (rollCount > 0) {
+                throw new BusinessError(
+                    `Cannot delete catalog with ${rollCount} roll(s). Please remove or reassign all rolls before deleting the catalog.`,
+                    'CATALOG_HAS_ROLLS',
+                    { catalogId: id, catalogName: existing.name, rollCount }
+                );
             }
 
-            return 0;
+            // 4. Delete from database
+            this.catalogRepo.delete(id);
+
+            // 5. Audit log
+            if (userId) {
+                this.auditRepo.logDelete('catalog', id, userId, existing);
+            }
         } catch (error) {
-            console.error('CatalogService.getRollsCount error:', error);
-            return 0;
+            if (error instanceof NotFoundError || error instanceof BusinessError) {
+                throw error;
+            }
+            console.error('CatalogService.delete error:', error);
+            throw new DatabaseError('Failed to delete catalog');
         }
     }
 
     /**
-     * Check if catalog code is unique
+     * Get all unique materials
      */
-    async isCodeUnique(code: string, excludeId?: string): Promise<boolean> {
+    async getMaterials(): Promise<string[]> {
         try {
-            const catalogs = await this.getAll();
-            const existing = catalogs.find(c => c.code === code);
-
-            if (!existing) return true;
-            if (excludeId && existing.id === excludeId) return true;
-
-            return false;
+            return this.catalogRepo.getAllMaterials();
         } catch (error) {
-            console.error('CatalogService.isCodeUnique error:', error);
-            return false;
+            console.error('CatalogService.getMaterials error:', error);
+            throw new DatabaseError('Failed to get materials');
         }
+    }
+
+    /**
+     * Get roll count for catalog
+     */
+    async getRollCount(catalogId: string): Promise<number> {
+        try {
+            return this.catalogRepo.getRollCount(catalogId);
+        } catch (error) {
+            console.error('CatalogService.getRollCount error:', error);
+            throw new DatabaseError('Failed to get roll count');
+        }
+    }
+
+    /**
+     * Map database catalog to API format
+     */
+    private mapToAPI(catalog: any): Catalog {
+        return {
+            id: catalog.id,
+            code: catalog.code,
+            name: catalog.name,
+            material: catalog.material,
+            description: catalog.description,
+            status: catalog.status,
+            image: catalog.image,
+            createdAt: catalog.createdAt instanceof Date ? catalog.createdAt.getTime() : catalog.createdAt,
+            updatedAt: catalog.updatedAt instanceof Date ? catalog.updatedAt.getTime() : catalog.updatedAt,
+            createdBy: catalog.createdBy || '',
+            updatedBy: catalog.updatedBy || '',
+            deletedAt: catalog.deletedAt ? (catalog.deletedAt instanceof Date ? catalog.deletedAt.getTime() : catalog.deletedAt) : null,
+            deletedBy: catalog.deletedBy || null,
+        };
     }
 }
 

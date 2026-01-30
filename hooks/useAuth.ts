@@ -66,15 +66,17 @@ export function useAuth() {
         }
     }, []);
 
-    // Check permission
-    const checkPermission = useCallback(async (permission: string): Promise<boolean> => {
-        try {
-            return await authService.checkPermission(permission);
-        } catch (err) {
-            console.error('useAuth.checkPermission error:', err);
-            return false;
-        }
-    }, []);
+    // Check permission based on user role (client-side check)
+    const checkPermission = useCallback((permission: string): boolean => {
+        if (!currentUser) return false;
+
+        // Admin has all permissions
+        if (currentUser.role === 'admin') return true;
+
+        // Simple permission check based on role
+        // Can be expanded based on specific permission requirements
+        return false;
+    }, [currentUser]);
 
     // Get token
     const getToken = useCallback((): string | null => {

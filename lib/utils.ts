@@ -61,18 +61,6 @@ export function formatDateTime(timestamp: number): string {
 }
 
 /**
- * Generate UUID v4
- * @returns UUID string
- */
-export function generateUUID(): string {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-        const r = Math.random() * 16 | 0;
-        const v = c === 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-    });
-}
-
-/**
  * Truncate string with ellipsis
  * @param str - String to truncate
  * @param maxLength - Maximum length
@@ -115,7 +103,56 @@ export function formatCurrency(amount: number, currency: string = 'USD'): string
 }
 
 /**
- * Merge className strings (utility for Tailwind)
+ * Generate a UUID v4
+ */
+export function generateUUID(): string {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
+    }
+    // Fallback for environments without crypto.randomUUID
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
+
+/**
+ * Hash password using SHA-256
+ * In production, use bcrypt or argon2 instead
+ */
+export async function hashPassword(password: string): Promise<string> {
+    // For development, using simple SHA-256
+    // In production, use bcrypt: const bcrypt = require('bcryptjs'); return bcrypt.hash(password, 10);
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Verify password against hash
+ */
+export async function verifyPassword(password: string, hash: string): Promise<boolean> {
+    const passwordHash = await hashPassword(password);
+    return passwordHash === hash;
+}
+
+/**
+ * Generate authentication token
+ * In production, use JWT
+ */
+export function generateToken(userId: string): string {
+    // For development, simple token
+    // In production, use JWT: const jwt = require('jsonwebtoken'); return jwt.sign({ userId }, secret, { expiresIn: '24h' });
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substring(2);
+    return `${userId}.${timestamp}.${random}`;
+}
+
+/**
+ * className utility for merging Tailwind classes
  * @param classes - Class names to merge
  * @returns Merged class names
  */

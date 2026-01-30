@@ -6,7 +6,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { rollService } from '@/lib/services/RollService';
+import { getAllRolls, createRoll as createRollAPI, updateRoll as updateRollAPI, deleteRoll as deleteRollAPI } from '@/lib/api/rolls';
 import type { Roll, CreateRollDTO, UpdateRollDTO, RollFilters } from '@/lib/electron-api.d';
 
 export function useRolls(initialFilters?: RollFilters) {
@@ -19,7 +19,7 @@ export function useRolls(initialFilters?: RollFilters) {
         try {
             setLoading(true);
             setError(null);
-            const data = await rollService.getAll(filters);
+            const data = await getAllRolls(filters);
             setRolls(data);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to load rolls');
@@ -33,7 +33,7 @@ export function useRolls(initialFilters?: RollFilters) {
     const createRoll = useCallback(async (data: CreateRollDTO): Promise<Roll | null> => {
         try {
             setError(null);
-            const newRoll = await rollService.create(data);
+            const newRoll = await createRollAPI(data);
             setRolls((prev) => [...prev, newRoll]);
             return newRoll;
         } catch (err) {
@@ -47,7 +47,7 @@ export function useRolls(initialFilters?: RollFilters) {
     const updateRoll = useCallback(async (id: string, data: UpdateRollDTO): Promise<Roll | null> => {
         try {
             setError(null);
-            const updatedRoll = await rollService.update(id, data);
+            const updatedRoll = await updateRollAPI(id, data);
             setRolls((prev) =>
                 prev.map((roll) => (roll.id === id ? updatedRoll : roll))
             );
@@ -63,7 +63,7 @@ export function useRolls(initialFilters?: RollFilters) {
     const deleteRoll = useCallback(async (id: string): Promise<boolean> => {
         try {
             setError(null);
-            await rollService.delete(id);
+            await deleteRollAPI(id);
             setRolls((prev) => prev.filter((roll) => roll.id !== id));
             return true;
         } catch (err) {
@@ -73,42 +73,12 @@ export function useRolls(initialFilters?: RollFilters) {
         }
     }, []);
 
-    // Search rolls
+    // Search rolls - using filters instead
     const searchRolls = useCallback(async (query: string) => {
-        try {
-            setLoading(true);
-            setError(null);
-            const data = await rollService.search(query);
-            setRolls(data);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Search failed');
-            console.error('useRolls.searchRolls error:', err);
-        } finally {
-            setLoading(false);
-        }
-    }, []);
+        await loadRolls({ search: query });
+    }, [loadRolls]);
 
-    // Find by barcode
-    const findByBarcode = useCallback(async (barcode: string): Promise<Roll | null> => {
-        try {
-            setError(null);
-            return await rollService.findByBarcode(barcode);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to find roll');
-            console.error('useRolls.findByBarcode error:', err);
-            return null;
-        }
-    }, []);
 
-    // Check barcode uniqueness
-    const isBarcodeUnique = useCallback(async (barcode: string, excludeId?: string): Promise<boolean> => {
-        try {
-            return await rollService.isBarcodeUnique(barcode, excludeId);
-        } catch (err) {
-            console.error('useRolls.isBarcodeUnique error:', err);
-            return false;
-        }
-    }, []);
 
     // Load on mount
     useEffect(() => {
@@ -124,7 +94,5 @@ export function useRolls(initialFilters?: RollFilters) {
         updateRoll,
         deleteRoll,
         searchRolls,
-        findByBarcode,
-        isBarcodeUnique,
     };
 }

@@ -6,7 +6,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { catalogService } from '@/lib/services/CatalogService';
+import { getAllCatalogs, getCatalogById, createCatalog as createCatalogAPI, updateCatalog as updateCatalogAPI, deleteCatalog as deleteCatalogAPI } from '@/lib/api/catalogs';
 import type { Catalog, CreateCatalogDTO, UpdateCatalogDTO } from '@/lib/electron-api.d';
 
 export function useCatalogs() {
@@ -19,7 +19,7 @@ export function useCatalogs() {
         try {
             setLoading(true);
             setError(null);
-            const data = await catalogService.getAll();
+            const data = await getAllCatalogs();
             setCatalogs(data);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to load catalogs');
@@ -33,7 +33,7 @@ export function useCatalogs() {
     const getCatalog = useCallback(async (id: string): Promise<Catalog | null> => {
         try {
             setError(null);
-            return await catalogService.getById(id);
+            return await getCatalogById(id);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to get catalog');
             console.error('useCatalogs.getCatalog error:', err);
@@ -45,7 +45,7 @@ export function useCatalogs() {
     const createCatalog = useCallback(async (data: CreateCatalogDTO): Promise<Catalog | null> => {
         try {
             setError(null);
-            const newCatalog = await catalogService.create(data);
+            const newCatalog = await createCatalogAPI(data);
             setCatalogs((prev) => [...prev, newCatalog]);
             return newCatalog;
         } catch (err) {
@@ -59,7 +59,7 @@ export function useCatalogs() {
     const updateCatalog = useCallback(async (id: string, data: UpdateCatalogDTO): Promise<Catalog | null> => {
         try {
             setError(null);
-            const updatedCatalog = await catalogService.update(id, data);
+            const updatedCatalog = await updateCatalogAPI(id, data);
             setCatalogs((prev) =>
                 prev.map((catalog) => (catalog.id === id ? updatedCatalog : catalog))
             );
@@ -75,7 +75,7 @@ export function useCatalogs() {
     const deleteCatalog = useCallback(async (id: string): Promise<boolean> => {
         try {
             setError(null);
-            await catalogService.delete(id);
+            await deleteCatalogAPI(id);
             setCatalogs((prev) => prev.filter((catalog) => catalog.id !== id));
             return true;
         } catch (err) {
@@ -86,25 +86,7 @@ export function useCatalogs() {
         }
     }, []);
 
-    // Get rolls count
-    const getRollsCount = useCallback(async (catalogId: string): Promise<number> => {
-        try {
-            return await catalogService.getRollsCount(catalogId);
-        } catch (err) {
-            console.error('useCatalogs.getRollsCount error:', err);
-            return 0;
-        }
-    }, []);
 
-    // Check code uniqueness
-    const isCodeUnique = useCallback(async (code: string, excludeId?: string): Promise<boolean> => {
-        try {
-            return await catalogService.isCodeUnique(code, excludeId);
-        } catch (err) {
-            console.error('useCatalogs.isCodeUnique error:', err);
-            return false;
-        }
-    }, []);
 
     // Load on mount
     useEffect(() => {
@@ -120,7 +102,5 @@ export function useCatalogs() {
         createCatalog,
         updateCatalog,
         deleteCatalog,
-        getRollsCount,
-        isCodeUnique,
     };
 }

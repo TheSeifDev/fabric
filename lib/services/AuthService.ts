@@ -1,43 +1,75 @@
 /**
- * Authentication Service
- * Handles login, logout, and current user state
+ * Authentication Service (Database-Enabled)
+ * Handles login, logout, and authentication with the database
  */
 
-import type { User, APIResponse } from '@/lib/electron-api.d';
-import { AuthError, DatabaseError, normalizeError } from '@/lib/errors';
+import type { User } from '@/lib/electron-api.d';
+import { AuthError, DatabaseError } from '@/lib/errors';
+import { getUserRepository, getAuditRepository } from '@/database/repositories';
+import { verifyPassword, generateToken } from '@/lib/utils';
 
 class AuthService {
+    private userRepo = getUserRepository();
+    private auditRepo = getAuditRepository();
+
     /**
      * Login user
      */
     async login(email: string, password: string): Promise<{ user: User; token: string }> {
         try {
-            if (typeof window !== 'undefined' && window.electronAPI) {
-                const response: APIResponse<{ user: User; token: string }> =
-                    await window.electronAPI.auth.login(email, password);
+            // 1. Find user by email
+            const dbUser = this.userRepo.findByEmail(email.toLowerCase());
 
-                if (!response.success) {
-                    if (response.error.code === 'AUTH_INVALID') {
-                        throw new AuthError('Invalid email or password', 'AUTH_INVALID');
-                    }
-                    if (response.error.code === 'AUTH_REQUIRED') {
-                        throw new AuthError('Authentication required', 'AUTH_REQUIRED');
-                    }
-                    throw new DatabaseError(response.error.message, response.error.code);
-                }
-
-                // Store token in localStorage
-                if (typeof window !== 'undefined') {
-                    localStorage.setItem('auth_token', response.data.token);
-                    localStorage.setItem('current_user', JSON.stringify(response.data.user));
-                }
-
-                return response.data;
+            if (!dbUser) {
+                throw new AuthError('Invalid email or password', 'AUTH_INVALID');
             }
 
-            throw new DatabaseError('electronAPI not available');
+            // 2. Check if user is active
+            if (dbUser.status !== 'active') {
+                throw new AuthError('Account is inactive', 'AUTH_INVALID');
+            }
+
+            // 3. Verify password
+            const isValid = await verifyPassword(password, dbUser.passwordHash);
+
+            if (!isValid) {
+                throw new AuthError('Invalid email or password', 'AUTH_INVALID');
+            }
+
+            // 4. Generate token
+            const token = generateToken(dbUser.id);
+
+            // 5. Map user to API format
+            const user: User = {
+                id: dbUser.id,
+                name: dbUser.name,
+                email: dbUser.email,
+                role: dbUser.role,
+                status: dbUser.status,
+                createdAt: dbUser.createdAt instanceof Date ? dbUser.createdAt.getTime() : dbUser.createdAt,
+                updatedAt: dbUser.updatedAt instanceof Date ? dbUser.updatedAt.getTime() : dbUser.updatedAt,
+                createdBy: '',
+                updatedBy: '',
+                deletedAt: null,
+                deletedBy: null,
+            };
+
+            // 6. Store token and user in localStorage
+            if (typeof window !== 'undefined') {
+                localStorage.setItem('auth_token', token);
+                localStorage.setItem('current_user', JSON.stringify(user));
+            }
+
+            // 7. Audit log
+            this.auditRepo.logCreate('user', dbUser.id, dbUser.id, { action: 'login' });
+
+            return { user, token };
         } catch (error) {
-            throw normalizeError(error);
+            if (error instanceof AuthError) {
+                throw error;
+            }
+            console.error('AuthService.login error:', error);
+            throw new DatabaseError('Login failed');
         }
     }
 
@@ -46,51 +78,37 @@ class AuthService {
      */
     async logout(): Promise<void> {
         try {
-            if (typeof window !== 'undefined' && window.electronAPI) {
-                const response: APIResponse<null> = await window.electronAPI.auth.logout();
+            // Get current user before clearing storage
+            const userStr = typeof window !== 'undefined' ? localStorage.getItem('current_user') : null;
+            const user = userStr ? JSON.parse(userStr) : null;
 
-                if (!response.success) {
-                    throw new DatabaseError(response.error.message, response.error.code);
-                }
-
-                // Clear local storage
-                if (typeof window !== 'undefined') {
-                    localStorage.removeItem('auth_token');
-                    localStorage.removeItem('current_user');
-                }
-
-                return;
+            // Clear localStorage
+            if (typeof window !== 'undefined') {
+                localStorage.removeItem('auth_token');
+                localStorage.removeItem('current_user');
             }
 
-            throw new DatabaseError('electronAPI not available');
+            // Audit log
+            if (user?.id) {
+                this.auditRepo.logCreate('user', user.id, user.id, { action: 'logout' });
+            }
         } catch (error) {
-            throw normalizeError(error);
+            console.error('AuthService.logout error:', error);
+            // Don't throw on logout errors
         }
     }
 
     /**
-     * Get current authenticated user
+     * Get current user from localStorage
      */
-    async getCurrentUser(): Promise<User | null> {
+    getCurrentUser(): User | null {
         try {
-            if (typeof window !== 'undefined' && window.electronAPI) {
-                const response: APIResponse<User | null> = await window.electronAPI.auth.getCurrentUser();
-
-                if (!response.success) {
-                    throw new Error(response.error.message);
-                }
-
-                return response.data;
-            }
-
-            // Fallback to localStorage
             if (typeof window !== 'undefined') {
-                const stored = localStorage.getItem('current_user');
-                if (stored) {
-                    return JSON.parse(stored);
+                const userStr = localStorage.getItem('current_user');
+                if (userStr) {
+                    return JSON.parse(userStr);
                 }
             }
-
             return null;
         } catch (error) {
             console.error('AuthService.getCurrentUser error:', error);
@@ -99,42 +117,49 @@ class AuthService {
     }
 
     /**
-     * Check if user has a specific permission
+     * Check if user is authenticated
      */
-    async checkPermission(permission: string): Promise<boolean> {
+    isAuthenticated(): boolean {
         try {
-            if (typeof window !== 'undefined' && window.electronAPI) {
-                const response: APIResponse<boolean> =
-                    await window.electronAPI.auth.checkPermission(permission);
-
-                if (!response.success) {
-                    return false;
-                }
-
-                return response.data;
+            if (typeof window !== 'undefined') {
+                const token = localStorage.getItem('auth_token');
+                const user = localStorage.getItem('current_user');
+                return !!(token && user);
             }
-
             return false;
         } catch (error) {
-            console.error('AuthService.checkPermission error:', error);
+            console.error('AuthService.isAuthenticated error:', error);
             return false;
         }
     }
 
     /**
-     * Check if user is authenticated
+     * Get auth token
      */
-    isAuthenticated(): boolean {
-        if (typeof window === 'undefined') return false;
-        return !!localStorage.getItem('auth_token');
+    getToken(): string | null {
+        try {
+            if (typeof window !== 'undefined') {
+                return localStorage.getItem('auth_token');
+            }
+            return null;
+        } catch (error) {
+            console.error('AuthService.getToken error:', error);
+            return null;
+        }
     }
 
     /**
-     * Get stored token
+     * Validate token (stub for now - in production, verify JWT)
      */
-    getToken(): string | null {
-        if (typeof window === 'undefined') return null;
-        return localStorage.getItem('auth_token');
+    async validateToken(token: string): Promise<boolean> {
+        try {
+            // For now, just check if token exists
+            // In production, this would verify JWT signature and expiration
+            return !!token;
+        } catch (error) {
+            console.error('AuthService.validateToken error:', error);
+            return false;
+        }
     }
 }
 

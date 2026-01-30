@@ -1,43 +1,45 @@
 /**
- * Roll Service
- * Handles all roll-related business logic and data access
- * Acts as an abstraction layer between UI and IPC/Database
+ * Roll Service (Database-Enabled)
+ * Handles all roll-related business logic with direct database access
  */
 
-import type { Roll, CreateRollDTO, UpdateRollDTO, RollFilters, APIResponse } from '@/lib/electron-api.d';
-import { NotFoundError, ConflictError, ValidationError, DatabaseError, normalizeError } from '@/lib/errors';
+import type { Roll, CreateRollDTO, UpdateRollDTO, RollFilters } from '@/lib/electron-api.d';
+import { NotFoundError, ConflictError, ValidationError, DatabaseError } from '@/lib/errors';
 import {
     validateRollCreate,
     validateRollUpdate,
     validateBarcodeAvailable,
-    validateStatusTransition
+    validateStatusTransition,
 } from '@/lib/business-rules';
+import { getRollRepository, getAuditRepository, type RollFilters as DBRollFilters } from '@/database/repositories';
+import type { NewRoll } from '@/database/schema';
+import { generateUUID } from '@/lib/utils';
 
 class RollService {
+    private rollRepo = getRollRepository();
+    private auditRepo = getAuditRepository();
+
     /**
      * Get all rolls with optional filters
      */
     async getAll(filters?: RollFilters): Promise<Roll[]> {
         try {
-            // In production, this will call window.electronAPI.rolls.getAll(filters)
-            // For now, return mock data or throw error if electronAPI not available
+            // Convert API filters to DB filters
+            const dbFilters: DBRollFilters = {
+                catalogId: filters?.catalog,
+                status: filters?.status,
+                degree: filters?.degree,
+                color: filters?.color,
+                search: filters?.search,
+            };
 
-            if (typeof window !== 'undefined' && window.electronAPI) {
-                const response: APIResponse<Roll[]> = await window.electronAPI.rolls.getAll(filters);
+            const rolls = this.rollRepo.findAll(dbFilters);
 
-                if (!response.success) {
-                    throw new Error(response.error.message);
-                }
-
-                return response.data;
-            }
-
-            // Fallback to empty array if electronAPI not available (SSR or development)
-            console.warn('electronAPI not available, returning empty array');
-            return [];
+            // Convert DB rolls to API format
+            return rolls.map(this.mapToAPI);
         } catch (error) {
             console.error('RollService.getAll error:', error);
-            throw error;
+            throw new DatabaseError('Failed to fetch rolls');
         }
     }
 
@@ -46,174 +48,207 @@ class RollService {
      */
     async getById(id: string): Promise<Roll> {
         try {
-            if (typeof window !== 'undefined' && window.electronAPI) {
-                const response: APIResponse<Roll> = await window.electronAPI.rolls.getById(id);
+            const roll = this.rollRepo.findById(id);
 
-                if (!response.success) {
-                    if (response.error.code === 'NOT_FOUND') {
-                        throw new NotFoundError('Roll', id);
-                    }
-                    throw new DatabaseError(response.error.message, response.error.code);
-                }
-
-                return response.data;
+            if (!roll) {
+                throw new NotFoundError('Roll', id);
             }
 
-            throw new DatabaseError('electronAPI not available');
+            return this.mapToAPI(roll);
         } catch (error) {
-            throw normalizeError(error);
+            if (error instanceof NotFoundError) throw error;
+            console.error('RollService.getById error:', error);
+            throw new DatabaseError('Failed to fetch roll');
         }
     }
 
     /**
-     * Find roll by barcode
+     * Get a roll by barcode
      */
-    async findByBarcode(barcode: string): Promise<Roll | null> {
+    async getByBarcode(barcode: string): Promise<Roll | null> {
         try {
-            if (typeof window !== 'undefined' && window.electronAPI) {
-                const response: APIResponse<Roll | null> = await window.electronAPI.rolls.findByBarcode(barcode);
-
-                if (!response.success) {
-                    throw new Error(response.error.message);
-                }
-
-                return response.data;
-            }
-
-            return null;
+            const roll = this.rollRepo.findActiveByBarcode(barcode);
+            return roll ? this.mapToAPI(roll) : null;
         } catch (error) {
-            console.error('RollService.findByBarcode error:', error);
-            throw error;
+            console.error('RollService.getByBarcode error:', error);
+            throw new DatabaseError('Failed to fetch roll by barcode');
         }
     }
 
     /**
      * Create a new roll
      */
-    async create(data: CreateRollDTO): Promise<Roll> {
+    async create(data: CreateRollDTO, userId?: string): Promise<Roll> {
         try {
-            // Business rule validation
+            // 1. Validate roll data
             validateRollCreate(data);
 
-            // Check barcode availability
-            const allRolls = await this.getAll();
-            await validateBarcodeAvailable(data.barcode, allRolls);
-
-            if (typeof window !== 'undefined' && window.electronAPI) {
-                const response: APIResponse<Roll> = await window.electronAPI.rolls.create(data);
-
-                if (!response.success) {
-                    if (response.error.code === 'CONFLICT') {
-                        throw new ConflictError(response.error.message, 'barcode');
-                    }
-                    if (response.error.code === 'VALIDATION_ERROR') {
-                        throw new ValidationError(response.error.message);
-                    }
-                    throw new DatabaseError(response.error.message, response.error.code);
-                }
-
-                return response.data;
+            // 2. Check if barcode is available in DB
+            if (!this.rollRepo.isBarcodeAvailable(data.barcode)) {
+                throw new ConflictError(
+                    `Barcode ${data.barcode} is already in use by an active roll`,
+                    'barcode'
+                );
             }
 
-            throw new DatabaseError('electronAPI not available');
+            // 4. Create roll in database
+            const now = new Date();
+            const newRoll: NewRoll = {
+                id: generateUUID(),
+                barcode: data.barcode,
+                catalogId: data.catalogId,
+                color: data.color,
+                degree: data.degree,
+                lengthMeters: data.lengthMeters,
+                status: data.status || 'in_stock',
+                location: data.location || null,
+                createdAt: now,
+                updatedAt: now,
+                createdBy: userId || null,
+                updatedBy: userId || null,
+            };
+
+            const created = this.rollRepo.create(newRoll);
+
+            // 5. Audit log
+            if (userId) {
+                this.auditRepo.logCreate('roll', created.id, userId, data);
+            }
+
+            return this.mapToAPI(created);
         } catch (error) {
-            throw normalizeError(error);
+            if (error instanceof ConflictError || error instanceof ValidationError) {
+                throw error;
+            }
+            console.error('RollService.create error:', error);
+            throw new DatabaseError('Failed to create roll');
         }
     }
 
     /**
-     * Update an existing roll
+     * Update a roll
      */
-    async update(id: string, data: UpdateRollDTO): Promise<Roll> {
+    async update(id: string, data: UpdateRollDTO, userId?: string): Promise<Roll> {
         try {
-            // Get current roll to validate against
-            const currentRoll = await this.getById(id);
-
-            // Business rule validation
-            validateRollUpdate(currentRoll, data);
-
-            // If barcode is being updated, validate availability
-            if (data.barcode && data.barcode !== currentRoll.barcode) {
-                const allRolls = await this.getAll();
-                await validateBarcodeAvailable(data.barcode, allRolls, id);
+            // 1. Get existing roll
+            const existing = this.rollRepo.findById(id);
+            if (!existing) {
+                throw new NotFoundError('Roll', id);
             }
 
-            if (typeof window !== 'undefined' && window.electronAPI) {
-                const response: APIResponse<Roll> = await window.electronAPI.rolls.update(id, data);
+            // 2. Validate status transition if status is being updated
+            if (data.status && data.status !== existing.status) {
+                validateStatusTransition(existing.status, data.status);
+            }
 
-                if (!response.success) {
-                    throw new Error(response.error.message);
+            // 4. Check barcode availability if barcode is being changed
+            if (data.barcode && data.barcode !== existing.barcode) {
+                if (!this.rollRepo.isBarcodeAvailable(data.barcode, id)) {
+                    throw new ConflictError(
+                        `Barcode ${data.barcode} is already in use by another active roll`,
+                        'barcode'
+                    );
                 }
-
-                return response.data;
             }
 
-            throw new Error('electronAPI not available');
+            // 5. Update roll in database
+            const updateData: Partial<NewRoll> = {
+                ...(data.barcode && { barcode: data.barcode }),
+                ...(data.catalogId && { catalogId: data.catalogId }),
+                ...(data.color && { color: data.color }),
+                ...(data.degree && { degree: data.degree }),
+                ...(data.lengthMeters !== undefined && { lengthMeters: data.lengthMeters }),
+                ...(data.status && { status: data.status }),
+                ...(data.location !== undefined && { location: data.location || null }),
+                updatedBy: userId || null,
+            };
+
+            const updated = this.rollRepo.update(id, updateData);
+
+            // 6. Audit log
+            if (userId) {
+                this.auditRepo.logUpdate('roll', id, userId, data);
+            }
+
+            return this.mapToAPI(updated);
         } catch (error) {
+            if (error instanceof NotFoundError || error instanceof ConflictError || error instanceof ValidationError) {
+                throw error;
+            }
             console.error('RollService.update error:', error);
-            throw error;
+            throw new DatabaseError('Failed to update roll');
         }
     }
 
     /**
-     * Delete a roll (soft delete)
+     * Delete a roll
      */
-    async delete(id: string): Promise<void> {
+    async delete(id: string, userId?: string): Promise<void> {
         try {
-            if (typeof window !== 'undefined' && window.electronAPI) {
-                const response: APIResponse<null> = await window.electronAPI.rolls.delete(id);
-
-                if (!response.success) {
-                    throw new Error(response.error.message);
-                }
-
-                return;
+            // 1. Get existing roll for audit
+            const existing = this.rollRepo.findById(id);
+            if (!existing) {
+                throw new NotFoundError('Roll', id);
             }
 
-            throw new Error('electronAPI not available');
+            // 2. Delete from database
+            this.rollRepo.delete(id);
+
+            // 3. Audit log
+            if (userId) {
+                this.auditRepo.logDelete('roll', id, userId, existing);
+            }
         } catch (error) {
+            if (error instanceof NotFoundError) throw error;
             console.error('RollService.delete error:', error);
-            throw error;
+            throw new DatabaseError('Failed to delete roll');
         }
     }
 
     /**
-     * Search rolls by query string
+     * Get inventory summary
      */
-    async search(query: string): Promise<Roll[]> {
+    async getInventorySummary() {
         try {
-            if (typeof window !== 'undefined' && window.electronAPI) {
-                const response: APIResponse<Roll[]> = await window.electronAPI.rolls.search(query);
-
-                if (!response.success) {
-                    throw new Error(response.error.message);
-                }
-
-                return response.data;
-            }
-
-            return [];
+            return this.rollRepo.getInventorySummary();
         } catch (error) {
-            console.error('RollService.search error:', error);
-            throw error;
+            console.error('RollService.getInventorySummary error:', error);
+            throw new DatabaseError('Failed to get inventory summary');
         }
     }
 
     /**
-     * Check if barcode is unique
+     * Get all unique colors
      */
-    async isBarcodeUnique(barcode: string, excludeId?: string): Promise<boolean> {
+    async getColors(): Promise<string[]> {
         try {
-            const existing = await this.findByBarcode(barcode);
-
-            if (!existing) return true;
-            if (excludeId && existing.id === excludeId) return true;
-
-            return false;
+            return this.rollRepo.getAllColors();
         } catch (error) {
-            console.error('RollService.isBarcodeUnique error:', error);
-            return false;
+            console.error('RollService.getColors error:', error);
+            throw new DatabaseError('Failed to get colors');
         }
+    }
+
+    /**
+     * Map database roll to API format
+     */
+    private mapToAPI(roll: any): Roll {
+        return {
+            id: roll.id,
+            barcode: roll.barcode,
+            catalogId: roll.catalogId,
+            color: roll.color,
+            degree: roll.degree,
+            lengthMeters: roll.lengthMeters,
+            status: roll.status,
+            location: roll.location,
+            createdAt: roll.createdAt instanceof Date ? roll.createdAt.getTime() : roll.createdAt,
+            updatedAt: roll.updatedAt instanceof Date ? roll.updatedAt.getTime() : roll.updatedAt,
+            createdBy: roll.createdBy || '',
+            updatedBy: roll.updatedBy || '',
+            deletedAt: roll.deletedAt ? (roll.deletedAt instanceof Date ? roll.deletedAt.getTime() : roll.deletedAt) : null,
+            deletedBy: roll.deletedBy || null,
+        };
     }
 }
 

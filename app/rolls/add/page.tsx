@@ -18,7 +18,7 @@ import { isValidationError, isConflictError } from '@/lib/errors';
 
 const AddRollPage = () => {
   const router = useRouter();
-  const { createRoll, isBarcodeUnique } = useRolls();
+  const { createRoll } = useRolls();
   const [loading, setLoading] = useState(false);
 
   const [formData, setFormData] = useState<CreateRollInput>({
@@ -65,15 +65,7 @@ const AddRollPage = () => {
     try {
       setLoading(true);
 
-      // Check barcode uniqueness
-      const isUnique = await isBarcodeUnique(formData.barcode);
-      if (!isUnique) {
-        setErrors({ barcode: 'This barcode already exists' });
-        setLoading(false);
-        return;
-      }
-
-      // Create roll via service layer
+      // Create roll via service layer (server will validate barcode uniqueness)
       const newRoll = await createRoll(result.data);
 
       if (newRoll) {
