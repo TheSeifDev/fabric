@@ -113,3 +113,12 @@ export function formatCurrency(amount: number, currency: string = 'USD'): string
         currency,
     }).format(amount);
 }
+
+/**
+ * Merge className strings (utility for Tailwind)
+ * @param classes - Class names to merge
+ * @returns Merged class names
+ */
+export function cn(...classes: (string | undefined | null | false)[]): string {
+    return classes.filter(Boolean).join(' ');
+}
