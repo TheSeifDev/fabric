@@ -8,6 +8,9 @@ import { rollService } from '@/lib/services/RollService';
 import type { APIResponse, CreateRollDTO, RollFilters } from '@/lib/electron-api.d';
 import { setupDatabase } from '@/database/init';
 
+// Force dynamic rendering (no static generation during build)
+export const dynamic = 'force-dynamic';
+
 // Initialize database on first API call
 let dbInitialized = false;
 

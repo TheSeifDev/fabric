@@ -9,8 +9,22 @@ import { getUserRepository, getAuditRepository } from '@/database/repositories';
 import { verifyPassword, generateToken } from '@/lib/utils';
 
 class AuthService {
-    private userRepo = getUserRepository();
-    private auditRepo = getAuditRepository();
+    private _userRepo: ReturnType<typeof getUserRepository> | null = null;
+    private _auditRepo: ReturnType<typeof getAuditRepository> | null = null;
+
+    private get userRepo() {
+        if (!this._userRepo) {
+            this._userRepo = getUserRepository();
+        }
+        return this._userRepo;
+    }
+
+    private get auditRepo() {
+        if (!this._auditRepo) {
+            this._auditRepo = getAuditRepository();
+        }
+        return this._auditRepo;
+    }
 
     /**
      * Login user

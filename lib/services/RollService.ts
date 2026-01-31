@@ -16,8 +16,22 @@ import type { NewRoll } from '@/database/schema';
 import { generateUUID } from '@/lib/utils';
 
 class RollService {
-    private rollRepo = getRollRepository();
-    private auditRepo = getAuditRepository();
+    private _rollRepo: ReturnType<typeof getRollRepository> | null = null;
+    private _auditRepo: ReturnType<typeof getAuditRepository> | null = null;
+
+    private get rollRepo() {
+        if (!this._rollRepo) {
+            this._rollRepo = getRollRepository();
+        }
+        return this._rollRepo;
+    }
+
+    private get auditRepo() {
+        if (!this._auditRepo) {
+            this._auditRepo = getAuditRepository();
+        }
+        return this._auditRepo;
+    }
 
     /**
      * Get all rolls with optional filters

@@ -1,25 +1,46 @@
 /**
  * useCatalogs Hook
  * React hook for managing catalog data and operations
+ * Supports both Electron (IPC) and Web (HTTP API) modes
  */
 
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { getAllCatalogs, getCatalogById, createCatalog as createCatalogAPI, updateCatalog as updateCatalogAPI, deleteCatalog as deleteCatalogAPI } from '@/lib/api/catalogs';
+import {
+    getAllCatalogs,
+    getCatalogById,
+    createCatalog as createCatalogAPI,
+    updateCatalog as updateCatalogAPI,
+    deleteCatalog as deleteCatalogAPI,
+} from '@/lib/api/catalogs';
 import type { Catalog, CreateCatalogDTO, UpdateCatalogDTO } from '@/lib/electron-api.d';
+
+// Helper to check if running in Electron
+const isElectron = typeof window !== 'undefined' && (window as any).electronAPI;
 
 export function useCatalogs() {
     const [catalogs, setCatalogs] = useState<Catalog[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    // Load catalogs
+    // Load catalogs - Electron IPC or Web API
     const loadCatalogs = useCallback(async () => {
         try {
             setLoading(true);
             setError(null);
-            const data = await getAllCatalogs();
+
+            let data: Catalog[];
+            if (isElectron) {
+                const result = await (window as any).electronAPI.catalogs.getAll();
+                if (!result.success) {
+                    throw new Error(result.error?.message || 'Failed to load catalogs');
+                }
+                data = result.data;
+            } else {
+                data = await getAllCatalogs();
+            }
+
             setCatalogs(data);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to load catalogs');
@@ -29,11 +50,23 @@ export function useCatalogs() {
         }
     }, []);
 
-    // Get catalog by ID
+    // Get specific catalog - Electron IPC or Web API
     const getCatalog = useCallback(async (id: string): Promise<Catalog | null> => {
         try {
             setError(null);
-            return await getCatalogById(id);
+
+            let catalog: Catalog;
+            if (isElectron) {
+                const result = await (window as any).electronAPI.catalogs.getById(id);
+                if (!result.success) {
+                    throw new Error(result.error?.message || 'Failed to get catalog');
+                }
+                catalog = result.data;
+            } else {
+                catalog = await getCatalogById(id);
+            }
+
+            return catalog;
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Failed to get catalog');
             console.error('useCatalogs.getCatalog error:', err);
@@ -41,11 +74,22 @@ export function useCatalogs() {
         }
     }, []);
 
-    // Create catalog
+    // Create catalog - Electron IPC or Web API
     const createCatalog = useCallback(async (data: CreateCatalogDTO): Promise<Catalog | null> => {
         try {
             setError(null);
-            const newCatalog = await createCatalogAPI(data);
+
+            let newCatalog: Catalog;
+            if (isElectron) {
+                const result = await (window as any).electronAPI.catalogs.create(data);
+                if (!result.success) {
+                    throw new Error(result.error?.message || 'Failed to create catalog');
+                }
+                newCatalog = result.data;
+            } else {
+                newCatalog = await createCatalogAPI(data);
+            }
+
             setCatalogs((prev) => [...prev, newCatalog]);
             return newCatalog;
         } catch (err) {
@@ -55,11 +99,22 @@ export function useCatalogs() {
         }
     }, []);
 
-    // Update catalog
+    // Update catalog - Electron IPC or Web API
     const updateCatalog = useCallback(async (id: string, data: UpdateCatalogDTO): Promise<Catalog | null> => {
         try {
             setError(null);
-            const updatedCatalog = await updateCatalogAPI(id, data);
+
+            let updatedCatalog: Catalog;
+            if (isElectron) {
+                const result = await (window as any).electronAPI.catalogs.update(id, data);
+                if (!result.success) {
+                    throw new Error(result.error?.message || 'Failed to update catalog');
+                }
+                updatedCatalog = result.data;
+            } else {
+                updatedCatalog = await updateCatalogAPI(id, data);
+            }
+
             setCatalogs((prev) =>
                 prev.map((catalog) => (catalog.id === id ? updatedCatalog : catalog))
             );
@@ -71,11 +126,20 @@ export function useCatalogs() {
         }
     }, []);
 
-    // Delete catalog
+    // Delete catalog - Electron IPC or Web API
     const deleteCatalog = useCallback(async (id: string): Promise<boolean> => {
         try {
             setError(null);
-            await deleteCatalogAPI(id);
+
+            if (isElectron) {
+                const result = await (window as any).electronAPI.catalogs.delete(id);
+                if (!result.success) {
+                    throw new Error(result.error?.message || 'Failed to delete catalog');
+                }
+            } else {
+                await deleteCatalogAPI(id);
+            }
+
             setCatalogs((prev) => prev.filter((catalog) => catalog.id !== id));
             return true;
         } catch (err) {
@@ -86,9 +150,7 @@ export function useCatalogs() {
         }
     }, []);
 
-
-
-    // Load on mount
+    // Load catalogs on mount
     useEffect(() => {
         loadCatalogs();
     }, [loadCatalogs]);

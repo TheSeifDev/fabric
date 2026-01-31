@@ -7,6 +7,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { rollService } from '@/lib/services/RollService';
 import type { APIResponse, UpdateRollDTO } from '@/lib/electron-api.d';
+import { setupDatabase } from '@/database/init';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/rolls/[id] - Get roll by ID

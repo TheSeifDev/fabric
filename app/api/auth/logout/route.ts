@@ -7,6 +7,9 @@ import { NextResponse } from 'next/server';
 import { authService } from '@/lib/services/AuthService';
 import type { APIResponse } from '@/lib/electron-api.d';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 /**
  * POST /api/auth/logout - Logout user
  */

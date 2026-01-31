@@ -16,8 +16,22 @@ import type { NewCatalog } from '@/database/schema';
 import { generateUUID } from '@/lib/utils';
 
 class CatalogService {
-    private catalogRepo = getCatalogRepository();
-    private auditRepo = getAuditRepository();
+    private _catalogRepo: ReturnType<typeof getCatalogRepository> | null = null;
+    private _auditRepo: ReturnType<typeof getAuditRepository> | null = null;
+
+    private get catalogRepo() {
+        if (!this._catalogRepo) {
+            this._catalogRepo = getCatalogRepository();
+        }
+        return this._catalogRepo;
+    }
+
+    private get auditRepo() {
+        if (!this._auditRepo) {
+            this._auditRepo = getAuditRepository();
+        }
+        return this._auditRepo;
+    }
 
     /**
      * Get all catalogs

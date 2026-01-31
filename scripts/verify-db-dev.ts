@@ -1,9 +1,8 @@
 /**
- * Verify Development Database Script
+ * Development DB Verification Script
  */
 
-// Force development mode
-process.env.NODE_ENV = 'development';
+// Note: Run this with NODE_ENV=development or rely on .env.local
 
 import { getSQLiteConnection } from '../database/connection';
 

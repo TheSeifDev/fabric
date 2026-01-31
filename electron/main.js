@@ -3,36 +3,56 @@ const path = require("path");
 
 const isDev = process.env.NODE_ENV === "development";
 
-// Mock data storage (will be replaced with SQLite later)
-let mockData = {
-  currentUser: null,
-  rolls: [],
-  catalogs: [],
-  users: [],
-  auditLogs: [],
-};
+// ============================================
+// DATABASE & SERVICES INITIALIZATION
+// ============================================
+
+// Import database initialization
+let setupDatabase;
+let authService;
+let rollService;
+let catalogService;
+let userService;
+let getAuditRepository;
+let getDatabaseStats;
+let backupDatabase;
+
+// Lazy load services (after app is ready)
+async function initializeServices() {
+  try {
+    // Dynamic import to avoid issues with TypeScript/ES modules
+    const dbInit = require(path.join(__dirname, '../database/init.js'));
+    setupDatabase = dbInit.setupDatabase;
+
+    const { authService: auth } = require(path.join(__dirname, '../lib/services/AuthService.js'));
+    const { rollService: rolls } = require(path.join(__dirname, '../lib/services/RollService.js'));
+    const { catalogService: catalogs } = require(path.join(__dirname, '../lib/services/CatalogService.js'));
+    const { userService: users } = require(path.join(__dirname, '../lib/services/UserService.js'));
+    const { getAuditRepository: auditRepo } = require(path.join(__dirname, '../database/repositories/index.js'));
+    const { getDatabaseStats: dbStats, backupDatabase: backup } = require(path.join(__dirname, '../database/connection.js'));
+
+    authService = auth;
+    rollService = rolls;
+    catalogService = catalogs;
+    userService = users;
+    getAuditRepository = auditRepo;
+    getDatabaseStats = dbStats;
+    backupDatabase = backup;
+
+    // Initialize database
+    await setupDatabase();
+    console.log('✅ Database initialized successfully');
+
+    return true;
+  } catch (error) {
+    console.error('❌ Failed to initialize services:', error);
+    return false;
+  }
+}
 
 // ============================================
 // UTILITY FUNCTIONS
 // ============================================
-
-/**
- * Generate UUID (simple version for now)
- */
-function generateUUID() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-}
-
-/**
- * Get current timestamp
- */
-function getTimestamp() {
-  return Date.now();
-}
 
 /**
  * Check if user has permission
@@ -51,58 +71,52 @@ function hasPermission(user, requiredPermission) {
 }
 
 /**
- * Create audit log entry
+ * Standard error handler for IPC
  */
-function createAuditLog(action, entityType, entityId, userId, oldValues = null, newValues = null) {
-  const log = {
-    id: generateUUID(),
-    userId,
-    action,
-    entityType,
-    entityId,
-    oldValues: oldValues ? JSON.stringify(oldValues) : null,
-    newValues: newValues ? JSON.stringify(newValues) : null,
-    timestamp: getTimestamp(),
-  };
-  mockData.auditLogs.push(log);
-  return log;
-}
-
-// ============================================
-// ERROR HANDLING
-// ============================================
-
-class AppError extends Error {
-  constructor(message, code, statusCode = 400) {
-    super(message);
-    this.code = code;
-    this.statusCode = statusCode;
-  }
-}
-
 function handleIPCError(error) {
   console.error('IPC Error:', error);
-
-  if (error instanceof AppError) {
-    return {
-      success: false,
-      error: {
-        message: error.message,
-        code: error.code,
-        statusCode: error.statusCode,
-      },
-    };
-  }
 
   return {
     success: false,
     error: {
-      message: 'Internal server error',
-      code: 'INTERNAL_ERROR',
-      statusCode: 500,
+      message: error.message || 'Internal server error',
+      code: error.code || 'INTERNAL_ERROR',
+      statusCode: error.statusCode || 500,
     },
   };
 }
+
+// ============================================
+// AUTHENTICATION IPC HANDLERS
+// ============================================
+
+ipcMain.handle('auth:login', async (event, email, password) => {
+  try {
+    const result = await authService.login(email, password);
+    return { success: true, data: result };
+  } catch (error) {
+    return handleIPCError(error);
+  }
+});
+
+ipcMain.handle('auth:logout', async () => {
+  try {
+    await authService.logout();
+    return { success: true, data: null };
+  } catch (error) {
+    return handleIPCError(error);
+  }
+});
+
+ipcMain.handle('auth:checkAuth', async (event, token) => {
+  try {
+    // This would validate the token and return user info
+    // For now, returning null (implement token validation later)
+    return { success: true, data: null };
+  } catch (error) {
+    return handleIPCError(error);
+  }
+});
 
 // ============================================
 // ROLLS IPC HANDLERS
@@ -110,22 +124,7 @@ function handleIPCError(error) {
 
 ipcMain.handle('rolls:getAll', async (event, filters = {}) => {
   try {
-    let rolls = [...mockData.rolls.filter(r => !r.deletedAt)];
-
-    // Apply filters
-    if (filters.catalog) {
-      rolls = rolls.filter(r => r.catalogId === filters.catalog);
-    }
-    if (filters.color) {
-      rolls = rolls.filter(r => r.color === filters.color);
-    }
-    if (filters.degree) {
-      rolls = rolls.filter(r => r.degree === filters.degree);
-    }
-    if (filters.status) {
-      rolls = rolls.filter(r => r.status === filters.status);
-    }
-
+    const rolls = await rollService.getAll(filters);
     return { success: true, data: rolls };
   } catch (error) {
     return handleIPCError(error);
@@ -134,10 +133,7 @@ ipcMain.handle('rolls:getAll', async (event, filters = {}) => {
 
 ipcMain.handle('rolls:getById', async (event, id) => {
   try {
-    const roll = mockData.rolls.find(r => r.id === id && !r.deletedAt);
-    if (!roll) {
-      throw new AppError('Roll not found', 'NOT_FOUND', 404);
-    }
+    const roll = await rollService.getById(id);
     return { success: true, data: roll };
   } catch (error) {
     return handleIPCError(error);
@@ -146,8 +142,8 @@ ipcMain.handle('rolls:getById', async (event, id) => {
 
 ipcMain.handle('rolls:findByBarcode', async (event, barcode) => {
   try {
-    const roll = mockData.rolls.find(r => r.barcode === barcode && !r.deletedAt);
-    return { success: true, data: roll || null };
+    const roll = await rollService.findByBarcode(barcode);
+    return { success: true, data: roll };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -155,33 +151,8 @@ ipcMain.handle('rolls:findByBarcode', async (event, barcode) => {
 
 ipcMain.handle('rolls:create', async (event, data) => {
   try {
-    const user = mockData.currentUser;
-    if (!hasPermission(user, 'rolls:create')) {
-      throw new AppError('Unauthorized', 'UNAUTHORIZED', 403);
-    }
-
-    // Check for duplicate barcode
-    const existing = mockData.rolls.find(r => r.barcode === data.barcode && !r.deletedAt);
-    if (existing) {
-      throw new AppError('Barcode already exists', 'DUPLICATE_BARCODE', 409);
-    }
-
-    const now = getTimestamp();
-    const roll = {
-      id: generateUUID(),
-      ...data,
-      status: data.status || 'in_stock',
-      createdAt: now,
-      createdBy: user?.id || 'system',
-      updatedAt: now,
-      updatedBy: user?.id || 'system',
-      deletedAt: null,
-      deletedBy: null,
-    };
-
-    mockData.rolls.push(roll);
-    createAuditLog('create', 'roll', roll.id, user?.id, null, roll);
-
+    const userId = event.sender.userId || null; // Set from auth context
+    const roll = await rollService.create(data, userId);
     return { success: true, data: roll };
   } catch (error) {
     return handleIPCError(error);
@@ -190,28 +161,9 @@ ipcMain.handle('rolls:create', async (event, data) => {
 
 ipcMain.handle('rolls:update', async (event, id, data) => {
   try {
-    const user = mockData.currentUser;
-    if (!hasPermission(user, 'rolls:update')) {
-      throw new AppError('Unauthorized', 'UNAUTHORIZED', 403);
-    }
-
-    const index = mockData.rolls.findIndex(r => r.id === id && !r.deletedAt);
-    if (index === -1) {
-      throw new AppError('Roll not found', 'NOT_FOUND', 404);
-    }
-
-    const oldRoll = { ...mockData.rolls[index] };
-    const updatedRoll = {
-      ...mockData.rolls[index],
-      ...data,
-      updatedAt: getTimestamp(),
-      updatedBy: user?.id || 'system',
-    };
-
-    mockData.rolls[index] = updatedRoll;
-    createAuditLog('update', 'roll', id, user?.id, oldRoll, updatedRoll);
-
-    return { success: true, data: updatedRoll };
+    const userId = event.sender.userId || null;
+    const roll = await rollService.update(id, data, userId);
+    return { success: true, data: roll };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -219,44 +171,19 @@ ipcMain.handle('rolls:update', async (event, id, data) => {
 
 ipcMain.handle('rolls:delete', async (event, id) => {
   try {
-    const user = mockData.currentUser;
-    if (!hasPermission(user, 'rolls:delete')) {
-      throw new AppError('Unauthorized - Admin only', 'UNAUTHORIZED', 403);
-    }
-
-    const index = mockData.rolls.findIndex(r => r.id === id && !r.deletedAt);
-    if (index === -1) {
-      throw new AppError('Roll not found', 'NOT_FOUND', 404);
-    }
-
-    const oldRoll = { ...mockData.rolls[index] };
-
-    // Soft delete
-    mockData.rolls[index] = {
-      ...mockData.rolls[index],
-      deletedAt: getTimestamp(),
-      deletedBy: user?.id || 'system',
-    };
-
-    createAuditLog('delete', 'roll', id, user?.id, oldRoll, null);
-
+    const userId = event.sender.userId || null;
+    await rollService.delete(id, userId);
     return { success: true, data: null };
   } catch (error) {
     return handleIPCError(error);
   }
 });
 
-ipcMain.handle('rolls:search', async (event, query) => {
+ipcMain.handle('rolls:updateStatus', async (event, id, status) => {
   try {
-    const lowerQuery = query.toLowerCase();
-    const results = mockData.rolls.filter(r =>
-      !r.deletedAt && (
-        r.barcode.toLowerCase().includes(lowerQuery) ||
-        r.color.toLowerCase().includes(lowerQuery) ||
-        r.catalog.toLowerCase().includes(lowerQuery)
-      )
-    );
-    return { success: true, data: results };
+    const userId = event.sender.userId || null;
+    const roll = await rollService.updateStatus(id, status, userId);
+    return { success: true, data: roll };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -266,9 +193,9 @@ ipcMain.handle('rolls:search', async (event, query) => {
 // CATALOGS IPC HANDLERS
 // ============================================
 
-ipcMain.handle('catalogs:getAll', async (event) => {
+ipcMain.handle('catalogs:getAll', async () => {
   try {
-    const catalogs = mockData.catalogs.filter(c => !c.deletedAt);
+    const catalogs = await catalogService.getAll();
     return { success: true, data: catalogs };
   } catch (error) {
     return handleIPCError(error);
@@ -277,10 +204,7 @@ ipcMain.handle('catalogs:getAll', async (event) => {
 
 ipcMain.handle('catalogs:getById', async (event, id) => {
   try {
-    const catalog = mockData.catalogs.find(c => c.id === id && !c.deletedAt);
-    if (!catalog) {
-      throw new AppError('Catalog not found', 'NOT_FOUND', 404);
-    }
+    const catalog = await catalogService.getById(id);
     return { success: true, data: catalog };
   } catch (error) {
     return handleIPCError(error);
@@ -289,27 +213,29 @@ ipcMain.handle('catalogs:getById', async (event, id) => {
 
 ipcMain.handle('catalogs:create', async (event, data) => {
   try {
-    const user = mockData.currentUser;
-    if (!hasPermission(user, 'catalogs:create')) {
-      throw new AppError('Unauthorized', 'UNAUTHORIZED', 403);
-    }
-
-    const now = getTimestamp();
-    const catalog = {
-      id: generateUUID(),
-      ...data,
-      createdAt: now,
-      createdBy: user?.id || 'system',
-      updatedAt: now,
-      updatedBy: user?.id || 'system',
-      deletedAt: null,
-      deletedBy: null,
-    };
-
-    mockData.catalogs.push(catalog);
-    createAuditLog('create', 'catalog', catalog.id, user?.id, null, catalog);
-
+    const userId = event.sender.userId || null;
+    const catalog = await catalogService.create(data, userId);
     return { success: true, data: catalog };
+  } catch (error) {
+    return handleIPCError(error);
+  }
+});
+
+ipcMain.handle('catalogs:update', async (event, id, data) => {
+  try {
+    const userId = event.sender.userId || null;
+    const catalog = await catalogService.update(id, data, userId);
+    return { success: true, data: catalog };
+  } catch (error) {
+    return handleIPCError(error);
+  }
+});
+
+ipcMain.handle('catalogs:delete', async (event, id) => {
+  try {
+    const userId = event.sender.userId || null;
+    await catalogService.delete(id, userId);
+    return { success: true, data: null };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -317,7 +243,7 @@ ipcMain.handle('catalogs:create', async (event, data) => {
 
 ipcMain.handle('catalogs:getRollsCount', async (event, catalogId) => {
   try {
-    const count = mockData.rolls.filter(r => r.catalogId === catalogId && !r.deletedAt).length;
+    const count = await catalogService.getRollsCount(catalogId);
     return { success: true, data: count };
   } catch (error) {
     return handleIPCError(error);
@@ -325,103 +251,52 @@ ipcMain.handle('catalogs:getRollsCount', async (event, catalogId) => {
 });
 
 // ============================================
-// AUTH IPC HANDLERS
+// USERS IPC HANDLERS
 // ============================================
 
-ipcMain.handle('auth:login', async (event, email, password) => {
+ipcMain.handle('users:getAll', async () => {
   try {
-    // Mock authentication (replace with real auth later)
-    const user = mockData.users.find(u => u.email === email);
-
-    if (!user) {
-      throw new AppError('Invalid credentials', 'INVALID_CREDENTIALS', 401);
-    }
-
-    // In real implementation, verify password hash here
-
-    mockData.currentUser = user;
-    createAuditLog('login', 'user', user.id, user.id);
-
-    return {
-      success: true,
-      data: {
-        user: { ...user, passwordHash: undefined },
-        token: 'mock-token-' + user.id
-      }
-    };
+    const users = await userService.getAll();
+    return { success: true, data: users };
   } catch (error) {
     return handleIPCError(error);
   }
 });
 
-ipcMain.handle('auth:logout', async (event) => {
+ipcMain.handle('users:getById', async (event, id) => {
   try {
-    const user = mockData.currentUser;
-    if (user) {
-      createAuditLog('logout', 'user', user.id, user.id);
-    }
-    mockData.currentUser = null;
+    const user = await userService.getById(id);
+    return { success: true, data: user };
+  } catch (error) {
+    return handleIPCError(error);
+  }
+});
+
+ipcMain.handle('users:create', async (event, data) => {
+  try {
+    const userId = event.sender.userId || null;
+    const user = await userService.create(data, userId);
+    return { success: true, data: user };
+  } catch (error) {
+    return handleIPCError(error);
+  }
+});
+
+ipcMain.handle('users:update', async (event, id, data) => {
+  try {
+    const userId = event.sender.userId || null;
+    const user = await userService.update(id, data, userId);
+    return { success: true, data: user };
+  } catch (error) {
+    return handleIPCError(error);
+  }
+});
+
+ipcMain.handle('users:delete', async (event, id) => {
+  try {
+    const userId = event.sender.userId || null;
+    await userService.delete(id, userId);
     return { success: true, data: null };
-  } catch (error) {
-    return handleIPCError(error);
-  }
-});
-
-ipcMain.handle('auth:getCurrentUser', async (event) => {
-  try {
-    const user = mockData.currentUser;
-    return {
-      success: true,
-      data: user ? { ...user, passwordHash: undefined } : null
-    };
-  } catch (error) {
-    return handleIPCError(error);
-  }
-});
-
-ipcMain.handle('auth:checkPermission', async (event, permission) => {
-  try {
-    const user = mockData.currentUser;
-    const hasAccess = hasPermission(user, permission);
-    return { success: true, data: hasAccess };
-  } catch (error) {
-    return handleIPCError(error);
-  }
-});
-
-// ============================================
-// SYSTEM IPC HANDLERS
-// ============================================
-
-ipcMain.handle('system:getInfo', async (event) => {
-  try {
-    return {
-      success: true,
-      data: {
-        version: app.getVersion(),
-        platform: process.platform,
-        electron: process.versions.electron,
-        chrome: process.versions.chrome,
-        node: process.versions.node,
-      },
-    };
-  } catch (error) {
-    return handleIPCError(error);
-  }
-});
-
-ipcMain.handle('system:getSettings', async (event) => {
-  try {
-    // Mock settings (replace with electron-store later)
-    return {
-      success: true,
-      data: {
-        companyName: 'Fabric Warehouse',
-        currency: 'USD',
-        units: 'meters',
-        autoBackup: true,
-      },
-    };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -431,36 +306,30 @@ ipcMain.handle('system:getSettings', async (event) => {
 // AUDIT LOG IPC HANDLERS
 // ============================================
 
-ipcMain.handle('auditLog:getLogs', async (event, options = {}) => {
+ipcMain.handle('audit:getLogs', async (event, filters) => {
   try {
-    const { page = 1, pageSize = 50 } = options;
-    const start = (page - 1) * pageSize;
-    const end = start + pageSize;
-
-    const logs = mockData.auditLogs
-      .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(start, end);
-
-    return {
-      success: true,
-      data: {
-        logs,
-        total: mockData.auditLogs.length,
-        page,
-        pageSize,
-      },
-    };
+    const auditRepo = getAuditRepository();
+    const logs = auditRepo.findAll(filters);
+    return { success: true, data: logs };
   } catch (error) {
     return handleIPCError(error);
   }
 });
 
-ipcMain.handle('auditLog:getByEntity', async (event, entityType, entityId) => {
+ipcMain.handle('audit:getByEntity', async (event, entityType, entityId) => {
   try {
-    const logs = mockData.auditLogs
-      .filter(log => log.entityType === entityType && log.entityId === entityId)
-      .sort((a, b) => b.timestamp - a.timestamp);
+    const auditRepo = getAuditRepository();
+    const logs = auditRepo.findByEntity(entityType, entityId);
+    return { success: true, data: logs };
+  } catch (error) {
+    return handleIPCError(error);
+  }
+});
 
+ipcMain.handle('audit:getByUser', async (event, userId) => {
+  try {
+    const auditRepo = getAuditRepository();
+    const logs = auditRepo.findByUser(userId);
     return { success: true, data: logs };
   } catch (error) {
     return handleIPCError(error);
@@ -468,58 +337,95 @@ ipcMain.handle('auditLog:getByEntity', async (event, entityType, entityId) => {
 });
 
 // ============================================
-// ELECTRON APP LIFECYCLE
+// DATABASE UTILITY IPC HANDLERS
 // ============================================
 
+ipcMain.handle('db:getStats', async () => {
+  try {
+    const stats = getDatabaseStats();
+    return { success: true, data: stats };
+  } catch (error) {
+    return handleIPCError(error);
+  }
+});
+
+ipcMain.handle('db:backup', async (event, backupPath) => {
+  try {
+    const result = backupDatabase(backupPath);
+    return { success: true, data: result };
+  } catch (error) {
+    return handleIPCError(error);
+  }
+});
+
+ipcMain.handle('db:getColors', async () => {
+  try {
+    // Get all unique colors from rolls
+    const rolls = await rollService.getAll();
+    const colors = [...new Set(rolls.map(r => r.color))].filter(Boolean);
+    return { success: true, data: colors };
+  } catch (error) {
+    return handleIPCError(error);
+  }
+});
+
+// ============================================
+// WINDOW MANAGEMENT
+// ============================================
+
+let mainWindow;
+
 function createWindow() {
-  const win = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      nodeIntegration: false,
       contextIsolation: true,
-      nodeIntegration: false, // Security: disable node integration
-      enableRemoteModule: false, // Security: disable remote module
+      preload: path.join(__dirname, "preload.js"),
     },
   });
 
+  const startURL = isDev
+    ? "http://localhost:3000"
+    : `file://${path.join(__dirname, "../out/index.html")}`;
+
+  mainWindow.loadURL(startURL);
+
   if (isDev) {
-    win.loadURL("http://localhost:3000");
-    win.webContents.openDevTools(); // Auto-open DevTools in development
-  } else {
-    win.loadFile(path.join(__dirname, "../out/index.html"));
+    mainWindow.webContents.openDevTools();
   }
 
-  // Initialize mock data
-  initializeMockData();
-}
-
-function initializeMockData() {
-  // Create mock admin user
-  mockData.users.push({
-    id: generateUUID(),
-    name: 'Admin User',
-    email: 'admin@fabric.com',
-    passwordHash: 'hashed_password', // In real app, use bcrypt
-    role: 'admin',
-    status: 'active',
-    createdAt: getTimestamp(),
-    updatedAt: getTimestamp(),
+  mainWindow.on("closed", () => {
+    mainWindow = null;
   });
-
-  // Set as current user for testing
-  mockData.currentUser = mockData.users[0];
-
-  console.log('Mock data initialized');
-  console.log('Login as: admin@fabric.com');
 }
 
-app.whenReady().then(createWindow);
+// ============================================
+// APP LIFECYCLE
+// ============================================
 
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+app.whenReady().then(async () => {
+  // Initialize database and services before opening window
+  const initialized = await initializeServices();
+
+  if (!initialized) {
+    console.error('Failed to initialize application');
+    app.quit();
+    return;
+  }
+
+  createWindow();
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
 });
 
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
 });

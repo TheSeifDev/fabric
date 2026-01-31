@@ -8,6 +8,9 @@ import { catalogService } from '@/lib/services/CatalogService';
 import type { APIResponse, CreateCatalogDTO } from '@/lib/electron-api.d';
 import { setupDatabase } from '@/database/init';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 // Initialize database on first API call
 let dbInitialized = false;
 

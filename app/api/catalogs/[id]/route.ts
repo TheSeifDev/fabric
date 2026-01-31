@@ -5,6 +5,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { setupDatabase } from '@/database/init';
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
 import { catalogService } from '@/lib/services/CatalogService';
 import type { APIResponse, UpdateCatalogDTO } from '@/lib/electron-api.d';
 
