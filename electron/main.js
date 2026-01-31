@@ -4,50 +4,40 @@ const path = require("path");
 const isDev = process.env.NODE_ENV === "development";
 
 // ============================================
-// DATABASE & SERVICES INITIALIZATION
+// API CONFIGURATION
 // ============================================
 
-// Import database initialization
-let setupDatabase;
-let authService;
-let rollService;
-let catalogService;
-let userService;
-let getAuditRepository;
-let getDatabaseStats;
-let backupDatabase;
+// Next.js API server URL (runs alongside Electron)
+const API_BASE_URL = isDev ? 'http://localhost:3000' : 'http://localhost:3000';
 
-// Lazy load services (after app is ready)
-async function initializeServices() {
-  try {
-    // Dynamic import to avoid issues with TypeScript/ES modules
-    const dbInit = require(path.join(__dirname, '../database/init.js'));
-    setupDatabase = dbInit.setupDatabase;
+/**
+ * Make authenticated API request to Next.js server
+ * @param {string} endpoint - API endpoint (e.g., '/api/rolls')
+ * @param {object} options - Fetch options
+ * @param {string} token - Auth token (optional)
+ */
+async function apiRequest(endpoint, options = {}, token = null) {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(token && { 'Authorization': `Bearer ${token}` }),
+    ...options.headers,
+  };
 
-    const { authService: auth } = require(path.join(__dirname, '../lib/services/AuthService.js'));
-    const { rollService: rolls } = require(path.join(__dirname, '../lib/services/RollService.js'));
-    const { catalogService: catalogs } = require(path.join(__dirname, '../lib/services/CatalogService.js'));
-    const { userService: users } = require(path.join(__dirname, '../lib/services/UserService.js'));
-    const { getAuditRepository: auditRepo } = require(path.join(__dirname, '../database/repositories/index.js'));
-    const { getDatabaseStats: dbStats, backupDatabase: backup } = require(path.join(__dirname, '../database/connection.js'));
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    ...options,
+    headers,
+  });
 
-    authService = auth;
-    rollService = rolls;
-    catalogService = catalogs;
-    userService = users;
-    getAuditRepository = auditRepo;
-    getDatabaseStats = dbStats;
-    backupDatabase = backup;
+  const data = await response.json();
 
-    // Initialize database
-    await setupDatabase();
-    console.log('✅ Database initialized successfully');
-
-    return true;
-  } catch (error) {
-    console.error('❌ Failed to initialize services:', error);
-    return false;
+  if (!response.ok) {
+    const error = new Error(data.error?.message || 'API request failed');
+    error.code = data.error?.code || 'API_ERROR';
+    error.statusCode = response.status;
+    throw error;
   }
+
+  return data;
 }
 
 // ============================================
@@ -87,45 +77,137 @@ function handleIPCError(error) {
 }
 
 // ============================================
-// AUTHENTICATION IPC HANDLERS
+// SESSION MANAGEMENT
+// ============================================
+
+// Store authenticated user sessions (webContentsId -> user)
+const activeSessions = new Map();
+
+/**
+ * Set authenticated user for a renderer process
+ */
+function setAuthenticatedUser(webContentsId, user) {
+  activeSessions.set(webContentsId, {
+    user,
+    loginTime: Date.now(),
+  });
+  console.log(`✅ User authenticated: ${user.email} (webContentsId: ${webContentsId})`);
+}
+
+/**
+ * Get authenticated user for a renderer process
+ */
+function getAuthenticatedUser(webContentsId) {
+  const session = activeSessions.get(webContentsId);
+  return session ? session.user : null;
+}
+
+/**
+ * Clear authenticated user for a renderer process
+ */
+function clearAuthenticatedUser(webContentsId) {
+  const session = activeSessions.get(webContentsId);
+  if (session) {
+    console.log(`🚪 User logged out: ${session.user.email}`);
+    activeSessions.delete(webContentsId);
+  }
+}
+
+/**
+ * Require authentication - throws if not authenticated
+ */
+function requireAuth(event) {
+  const user = getAuthenticatedUser(event.sender.id);
+  if (!user) {
+    const error = new Error('Authentication required');
+    error.code = 'AUTH_REQUIRED';
+    error.statusCode = 401;
+    throw error;
+  }
+  return user;
+}
+
+/**
+ * Require specific permission - throws if user doesn't have it
+ */
+function requirePermission(event, permission) {
+  const user = requireAuth(event);
+  if (!hasPermission(user, permission)) {
+    const error = new Error(`Permission denied: ${permission}`);
+    error.code = 'PERMISSION_DENIED';
+    error.statusCode = 403;
+    throw error;
+  }
+  return user;
+}
+
+// ============================================
+// AUTHENTICATION IPC HANDLERS (API PROXY)
 // ============================================
 
 ipcMain.handle('auth:login', async (event, email, password) => {
   try {
-    const result = await authService.login(email, password);
+    // Call Next.js API
+    const result = await apiRequest('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+
+    // Store user session in Electron
+    if (result.user) {
+      setAuthenticatedUser(event.sender.id, result.user);
+    }
+
     return { success: true, data: result };
   } catch (error) {
     return handleIPCError(error);
   }
 });
 
-ipcMain.handle('auth:logout', async () => {
+ipcMain.handle('auth:logout', async (event) => {
   try {
-    await authService.logout();
+    const user = getAuthenticatedUser(event.sender.id);
+
+    // Call Next.js API if user exists
+    if (user?.token) {
+      await apiRequest('/api/auth/logout', {
+        method: 'POST',
+      }, user.token);
+    }
+
+    // Clear user session in Electron
+    clearAuthenticatedUser(event.sender.id);
+
     return { success: true, data: null };
   } catch (error) {
     return handleIPCError(error);
   }
 });
 
-ipcMain.handle('auth:checkAuth', async (event, token) => {
+ipcMain.handle('auth:checkAuth', async (event) => {
   try {
-    // This would validate the token and return user info
-    // For now, returning null (implement token validation later)
-    return { success: true, data: null };
+    // Return current authenticated user from Electron session
+    const user = getAuthenticatedUser(event.sender.id);
+    return { success: true, data: user };
   } catch (error) {
     return handleIPCError(error);
   }
 });
 
 // ============================================
-// ROLLS IPC HANDLERS
+// ROLLS IPC HANDLERS (API PROXY WITH PERMISSIONS)
 // ============================================
 
 ipcMain.handle('rolls:getAll', async (event, filters = {}) => {
   try {
-    const rolls = await rollService.getAll(filters);
-    return { success: true, data: rolls };
+    const user = requirePermission(event, 'rolls:read');
+
+    const queryString = new URLSearchParams(filters).toString();
+    const result = await apiRequest(`/api/rolls${queryString ? '?' + queryString : ''}`, {
+      method: 'GET',
+    }, user.token);
+
+    return { success: true, data: result };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -133,8 +215,13 @@ ipcMain.handle('rolls:getAll', async (event, filters = {}) => {
 
 ipcMain.handle('rolls:getById', async (event, id) => {
   try {
-    const roll = await rollService.getById(id);
-    return { success: true, data: roll };
+    const user = requirePermission(event, 'rolls:read');
+
+    const result = await apiRequest(`/api/rolls/${id}`, {
+      method: 'GET',
+    }, user.token);
+
+    return { success: true, data: result };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -142,8 +229,14 @@ ipcMain.handle('rolls:getById', async (event, id) => {
 
 ipcMain.handle('rolls:findByBarcode', async (event, barcode) => {
   try {
-    const roll = await rollService.findByBarcode(barcode);
-    return { success: true, data: roll };
+    const user = requirePermission(event, 'rolls:read');
+
+    const result = await apiRequest(`/api/rolls?barcode=${encodeURIComponent(barcode)}`, {
+      method: 'GET',
+    }, user.token);
+
+    // Return first match
+    return { success: true, data: result };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -151,9 +244,14 @@ ipcMain.handle('rolls:findByBarcode', async (event, barcode) => {
 
 ipcMain.handle('rolls:create', async (event, data) => {
   try {
-    const userId = event.sender.userId || null; // Set from auth context
-    const roll = await rollService.create(data, userId);
-    return { success: true, data: roll };
+    const user = requirePermission(event, 'rolls:create');
+
+    const result = await apiRequest('/api/rolls', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, user.token);
+
+    return { success: true, data: result };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -161,9 +259,14 @@ ipcMain.handle('rolls:create', async (event, data) => {
 
 ipcMain.handle('rolls:update', async (event, id, data) => {
   try {
-    const userId = event.sender.userId || null;
-    const roll = await rollService.update(id, data, userId);
-    return { success: true, data: roll };
+    const user = requirePermission(event, 'rolls:update');
+
+    const result = await apiRequest(`/api/rolls/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }, user.token);
+
+    return { success: true, data: result };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -171,8 +274,12 @@ ipcMain.handle('rolls:update', async (event, id, data) => {
 
 ipcMain.handle('rolls:delete', async (event, id) => {
   try {
-    const userId = event.sender.userId || null;
-    await rollService.delete(id, userId);
+    const user = requirePermission(event, 'rolls:update');
+
+    await apiRequest(`/api/rolls/${id}`, {
+      method: 'DELETE',
+    }, user.token);
+
     return { success: true, data: null };
   } catch (error) {
     return handleIPCError(error);
@@ -181,22 +288,32 @@ ipcMain.handle('rolls:delete', async (event, id) => {
 
 ipcMain.handle('rolls:updateStatus', async (event, id, status) => {
   try {
-    const userId = event.sender.userId || null;
-    const roll = await rollService.updateStatus(id, status, userId);
-    return { success: true, data: roll };
+    const user = requirePermission(event, 'rolls:update');
+
+    const result = await apiRequest(`/api/rolls/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ status }),
+    }, user.token);
+
+    return { success: true, data: result };
   } catch (error) {
     return handleIPCError(error);
   }
 });
 
 // ============================================
-// CATALOGS IPC HANDLERS
+// CATALOGS IPC HANDLERS (API PROXY WITH PERMISSIONS)
 // ============================================
 
-ipcMain.handle('catalogs:getAll', async () => {
+ipcMain.handle('catalogs:getAll', async (event) => {
   try {
-    const catalogs = await catalogService.getAll();
-    return { success: true, data: catalogs };
+    const user = requirePermission(event, 'catalogs:read');
+
+    const result = await apiRequest('/api/catalogs', {
+      method: 'GET',
+    }, user.token);
+
+    return { success: true, data: result };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -204,8 +321,13 @@ ipcMain.handle('catalogs:getAll', async () => {
 
 ipcMain.handle('catalogs:getById', async (event, id) => {
   try {
-    const catalog = await catalogService.getById(id);
-    return { success: true, data: catalog };
+    const user = requirePermission(event, 'catalogs:read');
+
+    const result = await apiRequest(`/api/catalogs/${id}`, {
+      method: 'GET',
+    }, user.token);
+
+    return { success: true, data: result };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -213,9 +335,14 @@ ipcMain.handle('catalogs:getById', async (event, id) => {
 
 ipcMain.handle('catalogs:create', async (event, data) => {
   try {
-    const userId = event.sender.userId || null;
-    const catalog = await catalogService.create(data, userId);
-    return { success: true, data: catalog };
+    const user = requirePermission(event, 'catalogs:create');
+
+    const result = await apiRequest('/api/catalogs', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, user.token);
+
+    return { success: true, data: result };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -223,9 +350,14 @@ ipcMain.handle('catalogs:create', async (event, data) => {
 
 ipcMain.handle('catalogs:update', async (event, id, data) => {
   try {
-    const userId = event.sender.userId || null;
-    const catalog = await catalogService.update(id, data, userId);
-    return { success: true, data: catalog };
+    const user = requirePermission(event, 'catalogs:update');
+
+    const result = await apiRequest(`/api/catalogs/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }, user.token);
+
+    return { success: true, data: result };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -233,8 +365,12 @@ ipcMain.handle('catalogs:update', async (event, id, data) => {
 
 ipcMain.handle('catalogs:delete', async (event, id) => {
   try {
-    const userId = event.sender.userId || null;
-    await catalogService.delete(id, userId);
+    const user = requirePermission(event, 'catalogs:update');
+
+    await apiRequest(`/api/catalogs/${id}`, {
+      method: 'DELETE',
+    }, user.token);
+
     return { success: true, data: null };
   } catch (error) {
     return handleIPCError(error);
@@ -243,21 +379,32 @@ ipcMain.handle('catalogs:delete', async (event, id) => {
 
 ipcMain.handle('catalogs:getRollsCount', async (event, catalogId) => {
   try {
-    const count = await catalogService.getRollsCount(catalogId);
-    return { success: true, data: count };
+    const user = requirePermission(event, 'catalogs:read');
+
+    // This would need a custom endpoint or we fetch the catalog
+    const result = await apiRequest(`/api/catalogs/${catalogId}`, {
+      method: 'GET',
+    }, user.token);
+
+    return { success: true, data: result.rollsCount || 0 };
   } catch (error) {
     return handleIPCError(error);
   }
 });
 
 // ============================================
-// USERS IPC HANDLERS
+// USERS IPC HANDLERS (API PROXY WITH PERMISSIONS)
 // ============================================
 
-ipcMain.handle('users:getAll', async () => {
+ipcMain.handle('users:getAll', async (event) => {
   try {
-    const users = await userService.getAll();
-    return { success: true, data: users };
+    const user = requireAuth(event); // Admin check done by API
+
+    const result = await apiRequest('/api/users', {
+      method: 'GET',
+    }, user.token);
+
+    return { success: true, data: result };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -265,8 +412,13 @@ ipcMain.handle('users:getAll', async () => {
 
 ipcMain.handle('users:getById', async (event, id) => {
   try {
-    const user = await userService.getById(id);
-    return { success: true, data: user };
+    const user = requireAuth(event);
+
+    const result = await apiRequest(`/api/users/${id}`, {
+      method: 'GET',
+    }, user.token);
+
+    return { success: true, data: result };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -274,9 +426,14 @@ ipcMain.handle('users:getById', async (event, id) => {
 
 ipcMain.handle('users:create', async (event, data) => {
   try {
-    const userId = event.sender.userId || null;
-    const user = await userService.create(data, userId);
-    return { success: true, data: user };
+    const user = requireAuth(event); // Admin check done by API
+
+    const result = await apiRequest('/api/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }, user.token);
+
+    return { success: true, data: result };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -284,9 +441,14 @@ ipcMain.handle('users:create', async (event, data) => {
 
 ipcMain.handle('users:update', async (event, id, data) => {
   try {
-    const userId = event.sender.userId || null;
-    const user = await userService.update(id, data, userId);
-    return { success: true, data: user };
+    const user = requireAuth(event);
+
+    const result = await apiRequest(`/api/users/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }, user.token);
+
+    return { success: true, data: result };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -294,8 +456,12 @@ ipcMain.handle('users:update', async (event, id, data) => {
 
 ipcMain.handle('users:delete', async (event, id) => {
   try {
-    const userId = event.sender.userId || null;
-    await userService.delete(id, userId);
+    const user = requireAuth(event); // Admin check done by API
+
+    await apiRequest(`/api/users/${id}`, {
+      method: 'DELETE',
+    }, user.token);
+
     return { success: true, data: null };
   } catch (error) {
     return handleIPCError(error);
@@ -303,67 +469,47 @@ ipcMain.handle('users:delete', async (event, id) => {
 });
 
 // ============================================
-// AUDIT LOG IPC HANDLERS
+// AUDIT LOG & DATABASE UTILITY IPC HANDLERS
 // ============================================
 
-ipcMain.handle('audit:getLogs', async (event, filters) => {
+ipcMain.handle('audit:getLogs', async (event, filters = {}) => {
   try {
-    const auditRepo = getAuditRepository();
-    const logs = auditRepo.findAll(filters);
-    return { success: true, data: logs };
-  } catch (error) {
-    return handleIPCError(error);
-  }
-});
+    const user = requirePermission(event, 'reports:read');
 
-ipcMain.handle('audit:getByEntity', async (event, entityType, entityId) => {
-  try {
-    const auditRepo = getAuditRepository();
-    const logs = auditRepo.findByEntity(entityType, entityId);
-    return { success: true, data: logs };
-  } catch (error) {
-    return handleIPCError(error);
-  }
-});
+    const queryString = new URLSearchParams(filters).toString();
+    const result = await apiRequest(`/api/audit${queryString ? '?' + queryString : ''}`, {
+      method: 'GET',
+    }, user.token);
 
-ipcMain.handle('audit:getByUser', async (event, userId) => {
-  try {
-    const auditRepo = getAuditRepository();
-    const logs = auditRepo.findByUser(userId);
-    return { success: true, data: logs };
-  } catch (error) {
-    return handleIPCError(error);
-  }
-});
-
-// ============================================
-// DATABASE UTILITY IPC HANDLERS
-// ============================================
-
-ipcMain.handle('db:getStats', async () => {
-  try {
-    const stats = getDatabaseStats();
-    return { success: true, data: stats };
-  } catch (error) {
-    return handleIPCError(error);
-  }
-});
-
-ipcMain.handle('db:backup', async (event, backupPath) => {
-  try {
-    const result = backupDatabase(backupPath);
     return { success: true, data: result };
   } catch (error) {
     return handleIPCError(error);
   }
 });
 
-ipcMain.handle('db:getColors', async () => {
+ipcMain.handle('db:getStats', async (event) => {
   try {
-    // Get all unique colors from rolls
-    const rolls = await rollService.getAll();
-    const colors = [...new Set(rolls.map(r => r.color))].filter(Boolean);
-    return { success: true, data: colors };
+    const user = requirePermission(event, 'reports:read');
+
+    const result = await apiRequest('/api/database/stats', {
+      method: 'GET',
+    }, user.token);
+
+    return { success: true, data: result };
+  } catch (error) {
+    return handleIPCError(error);
+  }
+});
+
+ipcMain.handle('db:getColors', async (event) => {
+  try {
+    const user = requirePermission(event, 'rolls:read');
+
+    const result = await apiRequest('/api/database/colors', {
+      method: 'GET',
+    }, user.token);
+
+    return { success: true, data: result };
   } catch (error) {
     return handleIPCError(error);
   }
@@ -399,21 +545,21 @@ function createWindow() {
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
+
+  // Clean up session when window closes
+  mainWindow.webContents.on('destroyed', () => {
+    clearAuthenticatedUser(mainWindow.webContents.id);
+  });
 }
 
 // ============================================
 // APP LIFECYCLE
 // ============================================
 
-app.whenReady().then(async () => {
-  // Initialize database and services before opening window
-  const initialized = await initializeServices();
-
-  if (!initialized) {
-    console.error('Failed to initialize application');
-    app.quit();
-    return;
-  }
+app.whenReady().then(() => {
+  console.log('🚀 Electron app starting...');
+  console.log(`📡 API Server: ${API_BASE_URL}`);
+  console.log('⚠️  Note: Next.js dev server must be running on port 3000');
 
   createWindow();
 
@@ -425,6 +571,9 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
+  // Clear all sessions
+  activeSessions.clear();
+
   if (process.platform !== "darwin") {
     app.quit();
   }

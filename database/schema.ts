@@ -29,7 +29,7 @@ export const users = sqliteTable(
 
 /**
  * Catalogs Table
- * Stores fabric catalog information
+ * Stores fabric catalog information with soft delete support
  */
 export const catalogs = sqliteTable(
     'catalogs',
@@ -45,17 +45,21 @@ export const catalogs = sqliteTable(
         updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
         createdBy: text('created_by').references(() => users.id),
         updatedBy: text('updated_by').references(() => users.id),
+        deletedAt: integer('deleted_at', { mode: 'timestamp' }),
+        deletedBy: text('deleted_by').references(() => users.id),
     },
     (table) => ({
         codeIdx: index('idx_catalogs_code').on(table.code),
         statusIdx: index('idx_catalogs_status').on(table.status),
         createdByIdx: index('idx_catalogs_created_by').on(table.createdBy),
+        deletedAtIdx: index('idx_catalogs_deleted_at').on(table.deletedAt),
     })
 );
 
 /**
  * Rolls Table
- * Stores fabric roll inventory
+ * Stores fabric roll inventory with soft delete support
+ * CONSTRAINT: Active rolls must have unique barcodes (enforced by unique index)
  */
 export const rolls = sqliteTable(
     'rolls',
@@ -76,12 +80,17 @@ export const rolls = sqliteTable(
         updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
         createdBy: text('created_by').references(() => users.id),
         updatedBy: text('updated_by').references(() => users.id),
+        deletedAt: integer('deleted_at', { mode: 'timestamp' }),
+        deletedBy: text('deleted_by').references(() => users.id),
     },
     (table) => ({
         barcodeIdx: index('idx_rolls_barcode').on(table.barcode),
         catalogIdIdx: index('idx_rolls_catalog_id').on(table.catalogId),
         statusIdx: index('idx_rolls_status').on(table.status),
         barcodeStatusIdx: index('idx_rolls_barcode_status').on(table.barcode, table.status),
+        deletedAtIdx: index('idx_rolls_deleted_at').on(table.deletedAt),
+        // Unique constraint: Only one active roll per barcode (deletedAt IS NULL)
+        // This is enforced by partial unique index in migration
     })
 );
 
